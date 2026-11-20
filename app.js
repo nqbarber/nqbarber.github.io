@@ -623,11 +623,68 @@ function renderStats() {
     document.getElementById('stat-margin').textContent = `Tỷ suất lợi nhuận: ${margin}%`;
 }
 
+function clearServiceSearch() {
+    const input = document.getElementById('service-search');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    renderServices();
+}
+
 function renderServices() {
     const grid = document.getElementById('services-grid');
     const isAdmin = currentUser && currentUser.role === 'admin';
+    const searchInput = document.getElementById('service-search');
+    const clearBtn = document.getElementById('btn-clear-service-search');
+    const countEl = document.getElementById('service-search-count');
 
-    grid.innerHTML = appData.services.map(srv => {
+    const rawKeyword = searchInput ? searchInput.value.trim() : '';
+    const keyword = rawKeyword.toLowerCase();
+    const keywordClean = removeAccents(keyword);
+
+    if (clearBtn) {
+        if (rawKeyword.length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+    }
+
+    const filteredServices = appData.services.filter(srv => {
+        if (!keyword) return true;
+        const nameLower = (srv.name || '').toLowerCase();
+        const descLower = (srv.desc || '').toLowerCase();
+        const priceStr = String(srv.price || '');
+        const priceFormatted = formatVND(srv.price).toLowerCase();
+        const numericKeyword = keyword.replace(/[.,\s₫đ]/g, '');
+
+        return (
+            nameLower.includes(keyword) ||
+            removeAccents(nameLower).includes(keywordClean) ||
+            descLower.includes(keyword) ||
+            removeAccents(descLower).includes(keywordClean) ||
+            (numericKeyword && priceStr.includes(numericKeyword)) ||
+            priceFormatted.includes(keyword)
+        );
+    });
+
+    if (countEl) {
+        countEl.innerHTML = `Hiển thị: <strong class="text-barber-gold">${filteredServices.length}</strong>/${appData.services.length} dịch vụ`;
+    }
+
+    if (filteredServices.length === 0) {
+        grid.innerHTML = `
+            <div class="col-span-1 sm:col-span-2 flex flex-col items-center justify-center py-10 px-4 text-center bg-barber-dark/70 rounded-xl border border-dashed border-gray-700">
+                <i class="fa-solid fa-magnifying-glass text-2xl text-gray-500 mb-2"></i>
+                <p class="text-sm font-semibold text-gray-300">Không tìm thấy dịch vụ nào khớp với "${rawKeyword}"</p>
+                <p class="text-xs text-gray-500 mt-1">Thử tìm bằng từ khóa ngắn hơn (VD: cắt, uốn, nhuộm, gội, ráy tai...)</p>
+                <button type="button" onclick="clearServiceSearch()" class="mt-3 px-4 py-1.5 rounded-lg bg-barber-gold text-barber-black text-xs font-extrabold hover:bg-barber-goldHover transition">
+                    Xem tất cả dịch vụ
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = filteredServices.map(srv => {
         const qty = Number(selectedServices[srv.id]) || 0;
         const isSelected = qty > 0;
         return `

@@ -251,7 +251,7 @@
             <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <!-- Services Menu -->
                 <div class="lg:col-span-7 glass-card rounded-2xl p-5 sm:p-6 flex flex-col">
-                    <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h2 class="font-display text-xl sm:text-2xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
                                 <i class="fa-solid fa-scissors text-barber-gold"></i>
@@ -265,6 +265,24 @@
                                 <i class="fa-solid fa-plus"></i> Thêm Dịch Vụ
                             </div>
                         </button>
+                    </div>
+
+                    <!-- Thanh Tìm Kiếm Dịch Vụ -->
+                    <div class="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <div class="relative flex-1">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-barber-gold text-xs"></i>
+                            <input type="text" id="service-search" oninput="renderServices()"
+                                placeholder="Tìm dịch vụ theo tên, mô tả hoặc giá (VD: cắt, uốn, gội, 80000)..."
+                                class="w-full pl-9 pr-9 py-2.5 bg-barber-dark border border-gray-700 rounded-xl text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-barber-gold transition">
+                            <button type="button" id="btn-clear-service-search" onclick="clearServiceSearch()"
+                                class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-800 hover:bg-barber-red text-gray-300 hover:text-white flex items-center justify-center text-xs transition"
+                                title="Xóa từ khóa tìm kiếm">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div id="service-search-count" class="text-[11px] text-gray-400 bg-barber-dark/90 border border-gray-800 px-3 py-2 rounded-xl whitespace-nowrap text-center">
+                            Hiển thị: <strong class="text-barber-gold">0</strong> dịch vụ
+                        </div>
                     </div>
 
                     <div id="services-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 flex-1"></div>
