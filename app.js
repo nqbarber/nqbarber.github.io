@@ -1,4 +1,6 @@
 const STORAGE_KEY = 'NQ_BARBER_APP_DATA_FINAL';
+const SESSION_KEY = 'NQ_BARBER_CURRENT_SESSION_V1';
+const FIREBASE_DB_URL = 'https://nq-barber-db-default-rtdb.asia-southeast1.firebasedatabase.app/nq_barber_store.json';
 
 const BANK_NAMES = {
     MB: 'MB Bank',
@@ -99,21 +101,145 @@ let currentUser = null;
 // Map { serviceId: quantity }
 let selectedServices = {};
 let revealedPasswords = {};
+let lastSyncedSnapshot = '';
+let isSyncingToCloud = false;
+
+function normalizeAppData(raw) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_DATA));
+    if (!raw || typeof raw !== 'object') return base;
+
+    const merged = {
+        ...base,
+        ...raw,
+        shopInfo: {
+            ...base.shopInfo,
+            ...(raw.shopInfo || {})
+        }
+    };
+
+    if (!Array.isArray(merged.users) || merged.users.length === 0) {
+        merged.users = base.users;
+    }
+    if (!Array.isArray(merged.services)) {
+        merged.services = base.services;
+    }
+    if (!Array.isArray(merged.transactions)) {
+        merged.transactions = [];
+    }
+    if (!Array.isArray(merged.gallery)) {
+        merged.gallery = base.gallery;
+    }
+    if (!Array.isArray(merged.shopInfo.barbers) || merged.shopInfo.barbers.length === 0) {
+        merged.shopInfo.barbers = base.shopInfo.barbers;
+    }
+    return merged;
+}
 
 function loadData() {
     try {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
-            const parsed = JSON.parse(saved);
-            if (!Array.isArray(parsed.users) || parsed.users.length === 0) {
-                parsed.users = JSON.parse(JSON.stringify(DEFAULT_DATA.users));
-            }
-            return parsed;
+            return normalizeAppData(JSON.parse(saved));
         }
     } catch (e) {
         console.error(e);
     }
-    return JSON.parse(JSON.stringify(DEFAULT_DATA));
+    return normalizeAppData(null);
+}
+
+function updateSyncBadge(status) {
+    const badge = document.getElementById('sync-status-badge');
+    if (!badge) return;
+    if (status === 'syncing') {
+        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-barber-gold/15 text-barber-gold border border-barber-gold/30';
+        badge.innerHTML = '<i class="fa-solid fa-rotate fa-spin text-[9px]"></i> Đang đồng bộ...';
+    } else if (status === 'offline') {
+        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-barber-red/15 text-barber-red border border-barber-red/30';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-barber-red"></span> Lưu cục bộ';
+    } else {
+        badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Đã đồng bộ';
+    }
+}
+
+async function pushDataToFirebase() {
+    if (!FIREBASE_DB_URL) return;
+    isSyncingToCloud = true;
+    updateSyncBadge('syncing');
+    try {
+        const payload = JSON.stringify(appData);
+        const res = await fetch(FIREBASE_DB_URL, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload
+        });
+        if (res.ok) {
+            lastSyncedSnapshot = payload;
+            updateSyncBadge('synced');
+        } else {
+            updateSyncBadge('offline');
+        }
+    } catch (err) {
+        console.error('Firebase push error:', err);
+        updateSyncBadge('offline');
+    } finally {
+        isSyncingToCloud = false;
+    }
+}
+
+async function pullDataFromFirebase(isInitial = false) {
+    if (!FIREBASE_DB_URL || isSyncingToCloud) return;
+    try {
+        const res = await fetch(`${FIREBASE_DB_URL}?t=${Date.now()}`, {
+            cache: 'no-store'
+        });
+        if (!res.ok) {
+            updateSyncBadge('offline');
+            return;
+        }
+        const remoteData = await res.json();
+        if (!remoteData || typeof remoteData !== 'object') {
+            if (isInitial) {
+                await pushDataToFirebase();
+            }
+            return;
+        }
+
+        const normalizedRemote = normalizeAppData(remoteData);
+        const remoteStr = JSON.stringify(normalizedRemote);
+        const localStr = JSON.stringify(appData);
+
+        if (remoteStr !== localStr) {
+            appData = normalizedRemote;
+            lastSyncedSnapshot = remoteStr;
+            localStorage.setItem(STORAGE_KEY, remoteStr);
+
+            if (currentUser) {
+                const updatedCurrent = (appData.users || []).find(
+                    u => u.username.toLowerCase() === currentUser.username.toLowerCase()
+                );
+                if (updatedCurrent) {
+                    currentUser = updatedCurrent;
+                    saveSession(currentUser);
+                    applyRoleUI();
+                    renderAll();
+                    const accModal = document.getElementById('modal-accounts');
+                    if (accModal && !accModal.classList.contains('hidden')) {
+                        renderAccountsTable();
+                    }
+                } else {
+                    logout();
+                    showToast('Tài khoản của bạn đã bị Quản Trị Viên thu hồi!', 'error');
+                }
+            }
+        } else {
+            lastSyncedSnapshot = remoteStr;
+        }
+        updateSyncBadge('synced');
+    } catch (err) {
+        console.error('Firebase pull error:', err);
+        updateSyncBadge('offline');
+    }
 }
 
 function saveData() {
@@ -122,6 +248,60 @@ function saveData() {
     } catch (e) {
         console.error(e);
     }
+    pushDataToFirebase();
+}
+
+// ==========================================
+// PERSISTENT LOGIN SESSION (KHÔNG BỊ OUT KHI F5)
+// ==========================================
+function saveSession(user) {
+    if (!user) return;
+    try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify({
+            username: user.username,
+            role: user.role,
+            displayName: user.displayName,
+            loginAt: Date.now()
+        }));
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function clearSession() {
+    try {
+        localStorage.removeItem(SESSION_KEY);
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function restoreSessionOnLoad() {
+    try {
+        const rawSession = localStorage.getItem(SESSION_KEY);
+        if (!rawSession) return false;
+        const parsedSession = JSON.parse(rawSession);
+        if (!parsedSession || !parsedSession.username) return false;
+
+        const matchedAccount = (appData.users || []).find(
+            acc => acc.username.toLowerCase() === String(parsedSession.username).toLowerCase()
+        );
+
+        if (matchedAccount) {
+            currentUser = matchedAccount;
+            saveSession(matchedAccount);
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+            applyRoleUI();
+            renderAll();
+            return true;
+        } else {
+            clearSession();
+        }
+    } catch (e) {
+        console.error('Restore session error:', e);
+    }
+    return false;
 }
 
 function formatVND(amount) {
@@ -196,10 +376,13 @@ function closeModal(id) {
 // ==========================================
 // AUTHENTICATION & ROLE MANAGEMENT
 // ==========================================
-document.getElementById('login-form').addEventListener('submit', function(e) {
+document.getElementById('login-form').addEventListener('submit', async function(e) {
     e.preventDefault();
     const u = document.getElementById('login-username').value.trim().toLowerCase();
     const p = document.getElementById('login-password').value.trim();
+
+    // Đảm bảo kiểm tra mật khẩu mới nhất trên Firebase nếu mạng khả dụng
+    await pullDataFromFirebase(false);
     handleLogin(u, p);
 });
 
@@ -209,6 +392,7 @@ function handleLogin(username, password) {
     );
     if (account) {
         currentUser = account;
+        saveSession(account);
         document.getElementById('login-form').reset();
         document.getElementById('login-screen').classList.add('hidden');
         document.getElementById('main-app').classList.remove('hidden');
@@ -222,6 +406,7 @@ function handleLogin(username, password) {
 
 function logout() {
     currentUser = null;
+    clearSession();
     selectedServices = {};
     revealedPasswords = {};
     document.getElementById('main-app').classList.add('hidden');
@@ -327,6 +512,7 @@ function updateMemberPassword(idx) {
     targetUser.password = newPwd;
     if (currentUser.username === targetUser.username) {
         currentUser.password = newPwd;
+        saveSession(currentUser);
     }
     saveData();
     renderAccountsTable();
@@ -401,9 +587,13 @@ function renderShopHeader() {
     document.getElementById('display-shop-address').textContent = appData.shopInfo.address;
 
     const barberSelect = document.getElementById('bill-barber');
+    const prevSelected = barberSelect.value;
     barberSelect.innerHTML = appData.shopInfo.barbers
         .map(b => `<option value="${b}">${b}</option>`)
         .join('');
+    if (prevSelected && appData.shopInfo.barbers.includes(prevSelected)) {
+        barberSelect.value = prevSelected;
+    }
 }
 
 function renderStats() {
@@ -948,11 +1138,13 @@ document.getElementById('shop-settings-form').addEventListener('submit', functio
 });
 
 function resetDemoData() {
+    const preservedUsers = JSON.parse(JSON.stringify(appData.users || DEFAULT_DATA.users));
     appData = JSON.parse(JSON.stringify(DEFAULT_DATA));
+    appData.users = preservedUsers;
     saveData();
     closeModal('modal-shop-settings');
     renderAll();
-    showToast('Đã khôi phục toàn bộ dữ liệu mặc định ban đầu!', 'info');
+    showToast('Đã khôi phục dữ liệu mẫu mặc định (giữ nguyên danh sách tài khoản)!', 'info');
 }
 
 // ==========================================
@@ -964,7 +1156,7 @@ function renderGallery() {
 
     grid.innerHTML = appData.gallery.map(img => `
         <div class="relative group rounded-xl overflow-hidden border border-gray-800 aspect-video bg-barber-dark cursor-pointer"
-            onclick="openLightbox('${img.url}', '${img.caption.replace(/'/g, "\'")}')">
+            onclick="openLightbox('${img.url}', '${img.caption.replace(/'/g, "\\'")}')">
             <img src="${img.url}" alt="${img.caption}" loading="lazy"
                 class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
             <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-100 transition"></div>
@@ -1008,3 +1200,18 @@ function openLightbox(url, caption) {
     document.getElementById('lightbox-caption').textContent = caption;
     openModal('modal-lightbox');
 }
+
+// ==========================================
+// INITIALIZE SESSION & REAL-TIME SYNC ON LOAD
+// ==========================================
+window.addEventListener('DOMContentLoaded', () => {
+    restoreSessionOnLoad();
+    pullDataFromFirebase(true);
+    setInterval(() => {
+        pullDataFromFirebase(false);
+    }, 5000);
+});
+
+window.addEventListener('focus', () => {
+    pullDataFromFirebase(false);
+});
