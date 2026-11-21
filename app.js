@@ -188,16 +188,34 @@ function updateSoundToggleUI() {
     }
 }
 
-// Âm thanh "tinh tinh tinh" khi có khách đặt lịch
+function createBoostedOutput(ctx) {
+    // Dùng compressor + master gain cao để âm thanh rõ và to hơn mà không bị vỡ rè
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-12, ctx.currentTime);
+    compressor.knee.setValueAtTime(18, ctx.currentTime);
+    compressor.ratio.setValueAtTime(6, ctx.currentTime);
+    compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+    compressor.release.setValueAtTime(0.15, ctx.currentTime);
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(2.6, ctx.currentTime);
+
+    compressor.connect(masterGain);
+    masterGain.connect(ctx.destination);
+    return compressor;
+}
+
+// Âm thanh "tinh tinh tinh" to, rõ khi có khách đặt lịch
 function playTinhTinhTinh() {
     const ctx = getAudioContext();
     if (!ctx) return;
 
+    const out = createBoostedOutput(ctx);
     const now = ctx.currentTime;
     const notes = [
-        { freq: 1567.98, start: 0.00, dur: 0.22 },
-        { freq: 1975.53, start: 0.14, dur: 0.24 },
-        { freq: 2349.32, start: 0.28, dur: 0.42 }
+        { freq: 1567.98, start: 0.00, dur: 0.28 },
+        { freq: 1975.53, start: 0.16, dur: 0.30 },
+        { freq: 2349.32, start: 0.32, dur: 0.52 }
     ];
 
     notes.forEach(n => {
@@ -213,38 +231,39 @@ function playTinhTinhTinh() {
         overtone.frequency.setValueAtTime(n.freq * 2, now + n.start);
 
         gain.gain.setValueAtTime(0.0001, now + n.start);
-        gain.gain.exponentialRampToValueAtTime(0.24, now + n.start + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.65, now + n.start + 0.01);
         gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur);
 
         overtoneGain.gain.setValueAtTime(0.0001, now + n.start);
-        overtoneGain.gain.exponentialRampToValueAtTime(0.07, now + n.start + 0.01);
-        overtoneGain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur * 0.65);
+        overtoneGain.gain.exponentialRampToValueAtTime(0.25, now + n.start + 0.01);
+        overtoneGain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur * 0.75);
 
         osc.connect(gain);
         overtone.connect(overtoneGain);
-        gain.connect(ctx.destination);
-        overtoneGain.connect(ctx.destination);
+        gain.connect(out);
+        overtoneGain.connect(out);
 
         osc.start(now + n.start);
         overtone.start(now + n.start);
-        osc.stop(now + n.start + n.dur + 0.02);
-        overtone.stop(now + n.start + n.dur + 0.02);
+        osc.stop(now + n.start + n.dur + 0.03);
+        overtone.stop(now + n.start + n.dur + 0.03);
     });
 }
 
-// Âm thanh tiếng tiền xu rơi leng keng khi thanh toán xong
+// Âm thanh tiếng tiền xu rơi leng keng to, rõ khi thanh toán xong
 function playCoinDropSound() {
     const ctx = getAudioContext();
     if (!ctx) return;
 
+    const out = createBoostedOutput(ctx);
     const now = ctx.currentTime;
     const coins = [
-        { f1: 2786, f2: 3720, t: 0.00, d: 0.14 },
-        { f1: 3136, f2: 4186, t: 0.09, d: 0.14 },
-        { f1: 2637, f2: 3520, t: 0.17, d: 0.15 },
-        { f1: 3520, f2: 4698, t: 0.25, d: 0.16 },
-        { f1: 2960, f2: 3951, t: 0.33, d: 0.18 },
-        { f1: 3322, f2: 4434, t: 0.41, d: 0.22 }
+        { f1: 2786, f2: 3720, t: 0.00, d: 0.16 },
+        { f1: 3136, f2: 4186, t: 0.09, d: 0.16 },
+        { f1: 2637, f2: 3520, t: 0.17, d: 0.17 },
+        { f1: 3520, f2: 4698, t: 0.25, d: 0.18 },
+        { f1: 2960, f2: 3951, t: 0.33, d: 0.20 },
+        { f1: 3322, f2: 4434, t: 0.41, d: 0.25 }
     ];
 
     coins.forEach(c => {
@@ -262,17 +281,17 @@ function playCoinDropSound() {
         osc2.frequency.exponentialRampToValueAtTime(c.f2 * 1.48, now + c.t + c.d * 0.7);
 
         gain.gain.setValueAtTime(0.0001, now + c.t);
-        gain.gain.exponentialRampToValueAtTime(0.20, now + c.t + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.58, now + c.t + 0.008);
         gain.gain.exponentialRampToValueAtTime(0.0001, now + c.t + c.d);
 
         osc1.connect(gain);
         osc2.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(out);
 
         osc1.start(now + c.t);
         osc2.start(now + c.t);
-        osc1.stop(now + c.t + c.d + 0.02);
-        osc2.stop(now + c.t + c.d + 0.02);
+        osc1.stop(now + c.t + c.d + 0.03);
+        osc2.stop(now + c.t + c.d + 0.03);
     });
 }
 
@@ -293,7 +312,11 @@ function checkNewBookingsAndAlert() {
         playTinhTinhTinh();
         const latest = newlyArrived[0];
         if (currentUser) {
-            showToast(`🔔 Có ${newlyArrived.length} lịch hẹn mới: ${latest.customerName} (${latest.time} - ${latest.date})!`, 'info');
+            if (newlyArrived.length > 1) {
+                showToast(`Có ${newlyArrived.length} lịch hẹn mới — Gần nhất: <strong>${latest.customerName}</strong> (${latest.time} • ${latest.date})`, 'booking', 2000);
+            } else {
+                showBookingToast(latest);
+            }
         }
     }
 }
@@ -599,30 +622,59 @@ function getSelectedServiceItems() {
     return items;
 }
 
-function showToast(message, type = 'success') {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
+function showToast(message, type = 'success', durationMs = 2000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'fixed top-4 right-4 z-[9999] flex flex-col gap-2.5 max-w-sm w-full px-3 sm:px-0 pointer-events-none';
+        document.body.appendChild(container);
+    } else {
+        container.className = 'fixed top-4 right-4 z-[9999] flex flex-col gap-2.5 max-w-sm w-full px-3 sm:px-0 pointer-events-none';
+    }
+
     const toast = document.createElement('div');
     const colors = {
-        success: 'border-barber-gold bg-barber-dark text-white',
-        error: 'border-barber-red bg-barber-dark text-white',
-        info: 'border-blue-500 bg-barber-dark text-white'
+        success: 'border-barber-gold bg-barber-dark/95 text-white',
+        error: 'border-barber-red bg-barber-dark/95 text-white',
+        info: 'border-emerald-400 bg-barber-dark/95 text-white',
+        booking: 'border-barber-gold bg-gradient-to-r from-barber-dark via-[#1b1608] to-barber-dark text-white'
     };
     const icons = {
-        success: '<i class="fa-solid fa-circle-check text-barber-gold text-lg"></i>',
-        error: '<i class="fa-solid fa-circle-exclamation text-barber-red text-lg"></i>',
-        info: '<i class="fa-solid fa-circle-info text-blue-400 text-lg"></i>'
+        success: '<i class="fa-solid fa-circle-check text-barber-gold text-lg shrink-0"></i>',
+        error: '<i class="fa-solid fa-circle-exclamation text-barber-red text-lg shrink-0"></i>',
+        info: '<i class="fa-solid fa-circle-info text-blue-400 text-lg shrink-0"></i>',
+        booking: '<i class="fa-solid fa-calendar-check text-barber-gold text-lg shrink-0"></i>'
     };
 
-    toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border-l-4 shadow-2xl backdrop-blur-md transition-all duration-300 ${colors[type] || colors.success}`;
-    toast.innerHTML = `${icons[type]}<span class="text-xs sm:text-sm font-medium">${message}</span>`;
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(28px)';
+    toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border-l-4 shadow-2xl backdrop-blur-md transition-all duration-200 ${colors[type] || colors.success}`;
+    toast.innerHTML = `${icons[type] || icons.success}<span class="text-xs sm:text-sm font-semibold leading-snug">${message}</span>`;
 
     container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(0)';
+    });
+
+    const hideDelay = Math.max(400, Number(durationMs) - 200);
     setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.transform = 'translateX(20px)';
-        setTimeout(() => toast.remove(), 300);
-    }, 3200);
+        toast.style.transform = 'translateX(28px)';
+        setTimeout(() => toast.remove(), 200);
+    }, hideDelay);
+}
+
+function showBookingToast(booking) {
+    if (!booking) return;
+    const customer = booking.customerName || 'Khách hàng';
+    const timeStr = booking.time ? `${booking.time}` : '';
+    const dateStr = booking.date ? `${booking.date}` : '';
+    const when = [timeStr, dateStr].filter(Boolean).join(' • ');
+    const barber = booking.barber ? ` • Thợ: ${booking.barber}` : '';
+    const msg = `Đặt lịch mới: <strong>${customer}</strong>${when ? ` (${when})` : ''}${barber}`;
+    showToast(msg, 'booking', 2000);
 }
 
 function openModal(id) {
@@ -869,7 +921,7 @@ document.getElementById('guest-booking-form')?.addEventListener('submit', functi
     document.getElementById('book-date').value = getTodayInputDate();
     if (document.getElementById('book-guest-count')) document.getElementById('book-guest-count').value = 1;
     renderGuestPortal();
-    showToast(`Đặt lịch thành công (${guestCount} khách, ${totalServiceQty} DV)! Ước tính ${formatVND(estimatedTotal)}.`, 'success');
+    showToast(`Đặt lịch thành công: <strong>${name}</strong> (${timeVal} • ${dateVal})!`, 'booking', 2000);
 });
 
 // ==========================================
