@@ -1056,6 +1056,8 @@ function renderBookingsModal() {
         return;
     }
 
+    const isAdmin = currentUser && currentUser.role === 'admin';
+
     container.innerHTML = list.map(bk => {
         const isDone = bk.status === 'done';
         const approverText = bk.approvedBy
@@ -1090,9 +1092,11 @@ function renderBookingsModal() {
                             Duyệt & Đưa Vào Hóa Đơn
                         </button>
                     ` : ''}
-                    <button type="button" onclick="deleteBooking('${bk.id}')" class="p-2 rounded-lg bg-gray-800 hover:bg-barber-red text-gray-300 hover:text-white text-xs transition" title="Xóa lịch hẹn">
-                        <i class="fa-solid fa-trash"></i>
-                    </button>
+                    ${isAdmin ? `
+                        <button type="button" onclick="deleteBooking('${bk.id}')" class="p-2 rounded-lg bg-gray-800 hover:bg-barber-red text-gray-300 hover:text-white text-xs transition" title="Xóa lịch hẹn">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -1132,6 +1136,10 @@ function applyBookingToBill(id) {
 }
 
 function deleteBooking(id) {
+    if (!currentUser || currentUser.role !== 'admin') {
+        showToast('Chỉ Quản Trị Viên mới có quyền xóa lịch sử lịch hẹn!', 'error');
+        return;
+    }
     appData.bookings = (appData.bookings || []).filter(b => b.id !== id);
     saveData();
     updateBookingBadge();
