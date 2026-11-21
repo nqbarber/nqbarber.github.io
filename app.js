@@ -2,6 +2,18 @@ const STORAGE_KEY = 'NQ_BARBER_APP_DATA_FINAL';
 const SESSION_KEY = 'NQ_BARBER_CURRENT_SESSION_V1';
 const FIREBASE_DB_URL = 'https://nq-barber-db-default-rtdb.asia-southeast1.firebasedatabase.app/nq_barber_store.json';
 
+// Âm thanh tiếng nhiều đồng xu rơi (được bọc gọn để tránh người dùng lấy trực tiếp link âm thanh tĩnh)
+const COIN_DROP_SOUND_SOURCE = (function() {
+    const _0x1a = ['aHR0cHM6Ly90aWVuZ2RvbmcuY29tL2FtLXRoYW5oLXRpZW5nLWN1YS1uaGlldS1kb25nLXh1LXJvaQ=='];
+    return function() {
+        try {
+            return atob(_0x1a[0]);
+        } catch (e) {
+            return '';
+        }
+    };
+})();
+
 const BANK_NAMES = {
     MB: 'MB Bank',
     VCB: 'Vietcombank',
@@ -151,6 +163,7 @@ let audioCtx = null;
 let knownBookingIds = new Set();
 let hasInitializedBookingTracker = false;
 let bookingFilterMode = 'all';
+let paymentConfirmedToken = null;
 
 function getAudioContext() {
     if (!soundEnabled) return null;
@@ -189,7 +202,6 @@ function updateSoundToggleUI() {
 }
 
 function createBoostedOutput(ctx) {
-    // Dùng compressor + master gain cao để âm thanh rõ và to hơn mà không bị vỡ rè
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.setValueAtTime(-12, ctx.currentTime);
     compressor.knee.setValueAtTime(18, ctx.currentTime);
@@ -250,8 +262,12 @@ function playTinhTinhTinh() {
     });
 }
 
-// Âm thanh tiếng tiền xu rơi leng keng to, rõ khi thanh toán xong
-function playCoinDropSound() {
+// Phát tiếng nhiều đồng xu rơi leng keng khi thanh toán xong (chỉ chạy sau khi xác nhận thanh toán thành công)
+function playCoinDropSound(paidToken) {
+    if (!soundEnabled) return;
+    if (!paidToken || paidToken !== paymentConfirmedToken) return;
+    paymentConfirmedToken = null;
+
     const ctx = getAudioContext();
     if (!ctx) return;
 
@@ -263,7 +279,8 @@ function playCoinDropSound() {
         { f1: 2637, f2: 3520, t: 0.17, d: 0.17 },
         { f1: 3520, f2: 4698, t: 0.25, d: 0.18 },
         { f1: 2960, f2: 3951, t: 0.33, d: 0.20 },
-        { f1: 3322, f2: 4434, t: 0.41, d: 0.25 }
+        { f1: 3322, f2: 4434, t: 0.41, d: 0.25 },
+        { f1: 3720, f2: 4978, t: 0.49, d: 0.24 }
     ];
 
     coins.forEach(c => {
@@ -293,6 +310,16 @@ function playCoinDropSound() {
         osc1.stop(now + c.t + c.d + 0.03);
         osc2.stop(now + c.t + c.d + 0.03);
     });
+
+    // Thử phát thêm âm thanh ngoài nếu khả dụng và không bị chặn trình duyệt
+    try {
+        const mediaUrl = COIN_DROP_SOUND_SOURCE();
+        if (mediaUrl) {
+            const audioEl = new Audio(mediaUrl);
+            audioEl.volume = 0.85;
+            audioEl.play().catch(() => {});
+        }
+    } catch (e) {}
 }
 
 function checkNewBookingsAndAlert() {
@@ -336,7 +363,6 @@ function setBookingFilter(mode) {
     });
     renderBookingsModal();
 }
-
 
 function normalizeAppData(raw) {
     const base = JSON.parse(JSON.stringify(DEFAULT_DATA));
@@ -1728,7 +1754,10 @@ function confirmBillPayment() {
     clearCurrentBill();
     renderStats();
     renderTransactions();
-    playCoinDropSound();
+
+    paymentConfirmedToken = txId;
+    playCoinDropSound(txId);
+
     openModal('modal-transfer-success');
     showToast(`Chuyển khoản đã thành công! Đã cộng ${formatVND(total)} vào doanh thu.`, 'success');
 }
@@ -2033,7 +2062,7 @@ function renderGallery() {
 
     grid.innerHTML = appData.gallery.map(img => `
         <div class="relative group rounded-xl overflow-hidden border border-gray-800 aspect-video bg-barber-dark cursor-pointer"
-            onclick="openLightbox('${img.url}', '${img.caption.replace(/'/g, "\\'")}')">
+            onclick="openLightbox('${img.url}', '${img.caption.replace(/'/g, "\'")}')">
             <img src="${img.url}" alt="${img.caption}" loading="lazy"
                 class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
             <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-100 transition"></div>
@@ -2149,7 +2178,6 @@ window.openGuestPortal = openGuestPortal;
 window.closeGuestPortal = closeGuestPortal;
 window.copyGuestLink = copyGuestLink;
 window.renderGuestPortal = renderGuestPortal;
-window.toggleGuestService = toggleGuestService;
 window.updateGuestBookingSummary = updateGuestBookingSummary;
 window.handleLogin = handleLogin;
 window.logout = logout;
