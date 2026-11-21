@@ -72,6 +72,7 @@ const DEFAULT_DATA = {
             date: '19/11/2026 10:15'
         }
     ],
+    bookings: [],
     gallery: [
         {
             id: 'img-1',
@@ -98,11 +99,12 @@ const DEFAULT_DATA = {
 
 let appData = loadData();
 let currentUser = null;
-// Map { serviceId: quantity }
 let selectedServices = {};
+let guestSelectedIds = new Set();
 let revealedPasswords = {};
 let lastSyncedSnapshot = '';
 let isSyncingToCloud = false;
+let activeDateKey = getTodayDateStr();
 
 function normalizeAppData(raw) {
     const base = JSON.parse(JSON.stringify(DEFAULT_DATA));
@@ -126,6 +128,9 @@ function normalizeAppData(raw) {
     if (!Array.isArray(merged.transactions)) {
         merged.transactions = [];
     }
+    if (!Array.isArray(merged.bookings)) {
+        merged.bookings = [];
+    }
     if (!Array.isArray(merged.gallery)) {
         merged.gallery = base.gallery;
     }
@@ -145,6 +150,44 @@ function loadData() {
         console.error(e);
     }
     return normalizeAppData(null);
+}
+
+// ==========================================
+// DATE & MONTH HELPERS (TỰ ĐỘNG RESET QUA NGÀY MỚI)
+// ==========================================
+function getTodayDateStr() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+}
+
+function getTodayInputDate() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function getCurrentMonthValue() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+}
+
+// Parse "DD/MM/YYYY HH:mm" -> { dateStr: "DD/MM/YYYY", monthKey: "YYYY-MM" }
+function parseTxDateInfo(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return { dateStr: '', monthKey: '' };
+    const datePart = dateStr.trim().split(' ')[0] || '';
+    const parts = datePart.split('/');
+    if (parts.length === 3) {
+        const day = parts[0].padStart(2, '0');
+        const month = parts[1].padStart(2, '0');
+        const year = parts[2];
+        return {
+            dateStr: `${day}/${month}/${year}`,
+            monthKey: `${year}-${month}`
+        };
+    }
+    return { dateStr: datePart, monthKey: '' };
 }
 
 function updateSyncBadge(status) {
@@ -214,6 +257,10 @@ async function pullDataFromFirebase(isInitial = false) {
             lastSyncedSnapshot = remoteStr;
             localStorage.setItem(STORAGE_KEY, remoteStr);
 
+            if (!document.getElementById('guest-portal').classList.contains('hidden')) {
+                renderGuestPortal();
+            }
+
             if (currentUser) {
                 const updatedCurrent = (appData.users || []).find(
                     u => u.username.toLowerCase() === currentUser.username.toLowerCase()
@@ -226,6 +273,10 @@ async function pullDataFromFirebase(isInitial = false) {
                     const accModal = document.getElementById('modal-accounts');
                     if (accModal && !accModal.classList.contains('hidden')) {
                         renderAccountsTable();
+                    }
+                    const bookModal = document.getElementById('modal-bookings');
+                    if (bookModal && !bookModal.classList.contains('hidden')) {
+                        renderBookingsModal();
                     }
                 } else {
                     logout();
@@ -252,7 +303,7 @@ function saveData() {
 }
 
 // ==========================================
-// PERSISTENT LOGIN SESSION (KHÔNG BỊ OUT KHI F5)
+// PERSISTENT LOGIN SESSION
 // ==========================================
 function saveSession(user) {
     if (!user) return;
@@ -291,6 +342,7 @@ function restoreSessionOnLoad() {
             currentUser = matchedAccount;
             saveSession(matchedAccount);
             document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('guest-portal').classList.add('hidden');
             document.getElementById('main-app').classList.remove('hidden');
             applyRoleUI();
             renderAll();
@@ -374,6 +426,166 @@ function closeModal(id) {
 }
 
 // ==========================================
+// LOGIN PASSWORD EYE TOGGLE
+// ==========================================
+function toggleLoginPasswordVisibility() {
+    const pwdInput = document.getElementById('login-password');
+    const eyeIcon = document.getElementById('login-eye-icon');
+    if (!pwdInput || !eyeIcon) return;
+
+    if (pwdInput.type === 'password') {
+        pwdInput.type = 'text';
+        eyeIcon.classList.remove('fa-eye');
+        eyeIcon.classList.add('fa-eye-slash');
+    } else {
+        pwdInput.type = 'password';
+        eyeIcon.classList.remove('fa-eye-slash');
+        eyeIcon.classList.add('fa-eye');
+    }
+}
+
+// ==========================================
+// GUEST PORTAL (KHÁCH HÀNG XEM GIÁ & ĐẶT LỊCH)
+// ==========================================
+function openGuestPortal() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('main-app').classList.add('hidden');
+    document.getElementById('guest-portal').classList.remove('hidden');
+
+    const dateInput = document.getElementById('book-date');
+    if (dateInput && !dateInput.value) {
+        dateInput.value = getTodayInputDate();
+    }
+
+    renderGuestPortal();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function closeGuestPortal() {
+    document.getElementById('guest-portal').classList.add('hidden');
+    document.getElementById('login-screen').classList.remove('hidden');
+}
+
+function copyGuestLink() {
+    const baseUrl = window.location.href.split('?')[0];
+    const guestUrl = `${baseUrl}?guest=1`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(guestUrl).then(() => {
+            showToast('Đã sao chép link đặt lịch dành cho khách hàng!', 'success');
+        }).catch(() => {
+            showToast(`Link khách hàng: ${guestUrl}`, 'info');
+        });
+    } else {
+        showToast(`Link khách hàng: ${guestUrl}`, 'info');
+    }
+}
+
+function renderGuestPortal() {
+    document.getElementById('guest-shop-name').textContent = appData.shopInfo.name;
+    document.getElementById('guest-shop-tagline').textContent = appData.shopInfo.tagline;
+    document.getElementById('guest-shop-address').textContent = appData.shopInfo.address;
+    document.getElementById('guest-map-address-sub').textContent = appData.shopInfo.address;
+
+    const barberSelect = document.getElementById('book-barber');
+    if (barberSelect) {
+        const prev = barberSelect.value;
+        barberSelect.innerHTML = `<option value="Bất kỳ thợ nào rảnh">Bất kỳ thợ nào rảnh</option>` +
+            appData.shopInfo.barbers.map(b => `<option value="${b}">${b}</option>`).join('');
+        if (prev) barberSelect.value = prev;
+    }
+
+    const grid = document.getElementById('guest-services-grid');
+    if (!grid) return;
+
+    grid.innerHTML = appData.services.map(srv => {
+        const isChecked = guestSelectedIds.has(srv.id);
+        return `
+            <div onclick="toggleGuestService('${srv.id}')"
+                class="cursor-pointer rounded-xl p-4 border transition-all duration-200 flex flex-col justify-between select-none
+                ${isChecked
+                    ? 'bg-barber-gold/15 border-barber-gold shadow-[0_0_20px_rgba(255,215,0,0.2)]'
+                    : 'bg-barber-dark border-gray-800 hover:border-barber-gold/50'}">
+                <div>
+                    <div class="flex items-start justify-between gap-2">
+                        <h4 class="font-bold text-sm sm:text-base ${isChecked ? 'text-barber-gold' : 'text-white'}">${srv.name}</h4>
+                        <span class="w-6 h-6 rounded-full flex items-center justify-center border shrink-0
+                            ${isChecked ? 'bg-barber-gold text-barber-black border-barber-gold' : 'border-gray-600 text-gray-500'}">
+                            <i class="fa-solid ${isChecked ? 'fa-check' : 'fa-plus'} text-xs"></i>
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-1">${srv.desc || 'Dịch vụ tiêu chuẩn NQ Barber'}</p>
+                </div>
+                <div class="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between">
+                    <span class="font-display text-lg font-bold text-barber-gold">${formatVND(srv.price)}</span>
+                    <span class="text-[11px] font-bold ${isChecked ? 'text-emerald-400' : 'text-gray-400'}">
+                        ${isChecked ? '✓ Đã chọn đặt lịch' : 'Bấm để chọn'}
+                    </span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    updateGuestBookingSummary();
+}
+
+function toggleGuestService(id) {
+    if (guestSelectedIds.has(id)) {
+        guestSelectedIds.delete(id);
+    } else {
+        guestSelectedIds.add(id);
+    }
+    renderGuestPortal();
+}
+
+function updateGuestBookingSummary() {
+    const selected = appData.services.filter(s => guestSelectedIds.has(s.id));
+    const total = selected.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+    const totalEl = document.getElementById('book-estimated-total');
+    const noteEl = document.getElementById('book-service-note');
+
+    if (totalEl) totalEl.textContent = formatVND(total);
+    if (noteEl && selected.length > 0) {
+        noteEl.value = selected.map(s => `${s.name} (${formatVND(s.price)})`).join(', ');
+    }
+}
+
+document.getElementById('guest-booking-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const name = document.getElementById('book-name').value.trim();
+    const phone = document.getElementById('book-phone').value.trim();
+    const dateVal = document.getElementById('book-date').value;
+    const timeVal = document.getElementById('book-time').value;
+    const barber = document.getElementById('book-barber').value;
+    const note = document.getElementById('book-service-note').value.trim() || 'Cắt tóc tư vấn tại tiệm';
+
+    const selected = appData.services.filter(s => guestSelectedIds.has(s.id));
+    const estimatedTotal = selected.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+
+    const newBooking = {
+        id: 'bk-' + Date.now(),
+        customerName: name,
+        phone: phone,
+        date: dateVal,
+        time: timeVal,
+        barber: barber,
+        servicesText: note,
+        serviceIds: Array.from(guestSelectedIds),
+        estimatedTotal: estimatedTotal,
+        status: 'pending',
+        createdAt: getCurrentTimestamp()
+    };
+
+    appData.bookings.unshift(newBooking);
+    saveData();
+
+    guestSelectedIds.clear();
+    document.getElementById('guest-booking-form').reset();
+    document.getElementById('book-date').value = getTodayInputDate();
+    renderGuestPortal();
+    showToast(`Đặt lịch thành công! Hẹn gặp ${name} lúc ${timeVal} ngày ${dateVal}.`, 'success');
+});
+
+// ==========================================
 // AUTHENTICATION & ROLE MANAGEMENT
 // ==========================================
 document.getElementById('login-form').addEventListener('submit', async function(e) {
@@ -381,7 +593,6 @@ document.getElementById('login-form').addEventListener('submit', async function(
     const u = document.getElementById('login-username').value.trim().toLowerCase();
     const p = document.getElementById('login-password').value.trim();
 
-    // Đảm bảo kiểm tra mật khẩu mới nhất trên Firebase nếu mạng khả dụng
     await pullDataFromFirebase(false);
     handleLogin(u, p);
 });
@@ -395,6 +606,7 @@ function handleLogin(username, password) {
         saveSession(account);
         document.getElementById('login-form').reset();
         document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('guest-portal').classList.add('hidden');
         document.getElementById('main-app').classList.remove('hidden');
         applyRoleUI();
         renderAll();
@@ -431,6 +643,100 @@ function applyRoleUI() {
         document.getElementById('admin-finance-controls').classList.add('hidden');
         document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
     }
+}
+
+// ==========================================
+// BOOKINGS MANAGER (STAFF / ADMIN VIEW)
+// ==========================================
+function updateBookingBadge() {
+    const badge = document.getElementById('booking-badge-count');
+    if (!badge) return;
+    const pendingCount = (appData.bookings || []).filter(b => b.status === 'pending').length;
+    badge.textContent = pendingCount;
+}
+
+function openBookingsModal() {
+    renderBookingsModal();
+    openModal('modal-bookings');
+}
+
+function renderBookingsModal() {
+    const container = document.getElementById('bookings-list-container');
+    if (!container) return;
+
+    const list = appData.bookings || [];
+    if (list.length === 0) {
+        container.innerHTML = `
+            <div class="py-10 text-center text-gray-500 text-xs">
+                <i class="fa-solid fa-calendar-xmark text-2xl mb-2 opacity-40"></i>
+                <p>Chưa có lịch hẹn nào từ khách hàng.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = list.map(bk => {
+        const isDone = bk.status === 'done';
+        return `
+            <div class="bg-barber-dark/90 rounded-xl p-4 border ${isDone ? 'border-gray-800 opacity-70' : 'border-barber-gold/40'} flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="space-y-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-bold text-white text-sm">${bk.customerName}</span>
+                        <a href="tel:${bk.phone}" class="text-xs font-bold text-barber-gold hover:underline">
+                            <i class="fa-solid fa-phone mr-1"></i>${bk.phone}
+                        </a>
+                        ${isDone
+                            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400">ĐÃ ĐẾN TIỆM</span>'
+                            : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-barber-red/20 text-barber-gold">CHỜ ĐÓN KHÁCH</span>'}
+                    </div>
+                    <p class="text-xs text-gray-300">
+                        <i class="fa-solid fa-clock text-barber-gold mr-1"></i>Hẹn lúc: <strong>${bk.time}</strong> ngày <strong>${bk.date}</strong> • Thợ: <span class="text-barber-gold">${bk.barber}</span>
+                    </p>
+                    <p class="text-xs text-gray-400">Dịch vụ: ${bk.servicesText}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    ${!isDone ? `
+                        <button type="button" onclick="applyBookingToBill('${bk.id}')" class="px-3 py-2 rounded-lg bg-barber-gold hover:bg-barber-goldHover text-barber-black font-extrabold text-xs transition">
+                            Đưa Vào Hóa Đơn
+                        </button>
+                    ` : ''}
+                    <button type="button" onclick="deleteBooking('${bk.id}')" class="p-2 rounded-lg bg-gray-800 hover:bg-barber-red text-gray-300 hover:text-white text-xs transition" title="Xóa lịch hẹn">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function applyBookingToBill(id) {
+    const bk = (appData.bookings || []).find(b => b.id === id);
+    if (!bk) return;
+
+    bk.status = 'done';
+    document.getElementById('bill-customer').value = `${bk.customerName} (${bk.phone})`;
+
+    if (Array.isArray(bk.serviceIds) && bk.serviceIds.length > 0) {
+        selectedServices = {};
+        bk.serviceIds.forEach(sid => {
+            if (appData.services.some(s => s.id === sid)) {
+                selectedServices[sid] = 1;
+            }
+        });
+    }
+
+    saveData();
+    closeModal('modal-bookings');
+    renderAll();
+    showToast(`Đã chuyển lịch hẹn của ${bk.customerName} vào hóa đơn thanh toán!`, 'success');
+}
+
+function deleteBooking(id) {
+    appData.bookings = (appData.bookings || []).filter(b => b.id !== id);
+    saveData();
+    updateBookingBadge();
+    renderBookingsModal();
+    showToast('Đã xóa lịch hẹn.', 'info');
 }
 
 // ==========================================
@@ -570,7 +876,7 @@ function deleteMemberAccount(username) {
 }
 
 // ==========================================
-// RENDER DASHBOARD, SERVICES, BILL & HISTORY
+// RENDER DASHBOARD (TODAY AUTO-RESET + MONTHLY + ALL-TIME)
 // ==========================================
 function renderAll() {
     renderShopHeader();
@@ -579,6 +885,7 @@ function renderAll() {
     renderCurrentBill();
     renderTransactions();
     renderGallery();
+    updateBookingBadge();
 }
 
 function renderShopHeader() {
@@ -597,30 +904,83 @@ function renderShopHeader() {
 }
 
 function renderStats() {
-    let totalRev = 0;
-    let totalExp = 0;
-    let billCount = 0;
-    let expCount = 0;
+    const todayStr = getTodayDateStr();
+    activeDateKey = todayStr;
+
+    const todayLabelEl = document.getElementById('today-date-label');
+    if (todayLabelEl) todayLabelEl.textContent = `Hôm nay: ${todayStr}`;
+
+    const monthPicker = document.getElementById('month-picker');
+    if (monthPicker && !monthPicker.value) {
+        monthPicker.value = getCurrentMonthValue();
+    }
+    const selectedMonth = monthPicker ? monthPicker.value : getCurrentMonthValue();
+
+    // Format month label "Tháng MM/YYYY"
+    let monthDisplay = selectedMonth;
+    if (selectedMonth && selectedMonth.includes('-')) {
+        const [y, m] = selectedMonth.split('-');
+        monthDisplay = `Tháng ${m}/${y}`;
+    }
+
+    document.getElementById('month-rev-label').textContent = `Doanh Thu ${monthDisplay}`;
+    document.getElementById('month-exp-label').textContent = `Chi Tiêu ${monthDisplay}`;
+    document.getElementById('month-profit-label').textContent = `Lợi Nhuận ${monthDisplay}`;
+
+    let todayRev = 0, todayExp = 0, todayBills = 0, todayExps = 0;
+    let monthRev = 0, monthExp = 0, monthBills = 0, monthExps = 0;
+    let totalRev = 0, totalExp = 0;
 
     appData.transactions.forEach(tx => {
+        const amt = Number(tx.amount) || 0;
+        const { dateStr, monthKey } = parseTxDateInfo(tx.date);
+
         if (tx.type === 'income') {
-            totalRev += Number(tx.amount) || 0;
-            billCount++;
+            totalRev += amt;
+            if (dateStr === todayStr) {
+                todayRev += amt;
+                todayBills++;
+            }
+            if (monthKey === selectedMonth) {
+                monthRev += amt;
+                monthBills++;
+            }
         } else {
-            totalExp += Number(tx.amount) || 0;
-            expCount++;
+            totalExp += amt;
+            if (dateStr === todayStr) {
+                todayExp += amt;
+                todayExps++;
+            }
+            if (monthKey === selectedMonth) {
+                monthExp += amt;
+                monthExps++;
+            }
         }
     });
 
-    const profit = totalRev - totalExp;
-    const margin = totalRev > 0 ? Math.round((profit / totalRev) * 100) : 0;
+    // Update Today's Board (Tự động 0 ₫ khi qua ngày mới)
+    const todayProfit = todayRev - todayExp;
+    document.getElementById('today-revenue').textContent = formatVND(todayRev);
+    document.getElementById('today-expense').textContent = formatVND(todayExp);
+    document.getElementById('today-profit').textContent = formatVND(todayProfit);
+    document.getElementById('today-bill-count').textContent = `${todayBills} hóa đơn trong ngày`;
+    document.getElementById('today-expense-count').textContent = `${todayExps} khoản chi trong ngày`;
 
+    // Update Monthly Board
+    const monthProfit = monthRev - monthExp;
+    const monthMargin = monthRev > 0 ? Math.round((monthProfit / monthRev) * 100) : 0;
+    document.getElementById('month-revenue').textContent = formatVND(monthRev);
+    document.getElementById('month-expense').textContent = formatVND(monthExp);
+    document.getElementById('month-profit').textContent = formatVND(monthProfit);
+    document.getElementById('month-bill-count').innerHTML = `<i class="fa-solid fa-receipt mr-1"></i>${monthBills} hóa đơn trong tháng`;
+    document.getElementById('month-expense-count').innerHTML = `<i class="fa-solid fa-box-open mr-1"></i>${monthExps} khoản chi`;
+    document.getElementById('month-margin').textContent = `Tỷ suất lợi nhuận: ${monthMargin}%`;
+
+    // Update All-Time Summary Card
+    const totalProfit = totalRev - totalExp;
     document.getElementById('stat-revenue').textContent = formatVND(totalRev);
     document.getElementById('stat-expense').textContent = formatVND(totalExp);
-    document.getElementById('stat-profit').textContent = formatVND(profit);
-    document.getElementById('stat-bill-count').innerHTML = `<i class="fa-solid fa-receipt mr-1"></i>${billCount} hóa đơn dịch vụ`;
-    document.getElementById('stat-expense-count').innerHTML = `<i class="fa-solid fa-box-open mr-1"></i>${expCount} khoản chi`;
-    document.getElementById('stat-margin').textContent = `Tỷ suất lợi nhuận: ${margin}%`;
+    document.getElementById('stat-profit').textContent = formatVND(totalProfit);
 }
 
 function clearServiceSearch() {
@@ -854,7 +1214,6 @@ function openQRCheckoutModal() {
         </div>
     `).join('');
 
-    // Generate Official VietQR Image URL
     const vietQrUrl = `https://img.vietqr.io/image/${encodeURIComponent(bankId)}-${encodeURIComponent(bankAcc)}-compact2.png?amount=${total}&addInfo=${encodeURIComponent(rawInfo)}&accountName=${encodeURIComponent(holder)}`;
 
     const imgEl = document.getElementById('vietqr-img');
@@ -910,7 +1269,6 @@ function confirmBillPayment() {
     saveData();
     closeModal('modal-qr');
 
-    // Populate Transfer Success Receipt Modal
     document.getElementById('success-tx-amount').textContent = formatVND(total);
     document.getElementById('success-tx-id').textContent = '#' + txId.toUpperCase();
     document.getElementById('success-tx-customer').textContent = customer;
@@ -933,9 +1291,17 @@ function renderTransactions() {
     const search = (document.getElementById('tx-search').value || '').toLowerCase();
     const filter = document.getElementById('tx-filter').value;
     const isAdmin = currentUser && currentUser.role === 'admin';
+    const todayStr = getTodayDateStr();
 
     const filtered = appData.transactions.filter(tx => {
-        const matchType = filter === 'all' || tx.type === filter;
+        const { dateStr } = parseTxDateInfo(tx.date);
+        let matchType = true;
+        if (filter === 'today') {
+            matchType = dateStr === todayStr;
+        } else if (filter !== 'all') {
+            matchType = tx.type === filter;
+        }
+
         const matchSearch =
             tx.title.toLowerCase().includes(search) ||
             (tx.customer || '').toLowerCase().includes(search) ||
@@ -1012,7 +1378,7 @@ document.getElementById('expense-form').addEventListener('submit', function(e) {
 });
 
 // ==========================================
-// ADMIN CONTROLS (SERVICES, TX, DIRECT BALANCE, SETTINGS)
+// ADMIN CONTROLS
 // ==========================================
 function openServiceModal(id = null) {
     if (!currentUser || currentUser.role !== 'admin') return;
@@ -1259,16 +1625,42 @@ function openLightbox(url, caption) {
 }
 
 // ==========================================
-// INITIALIZE SESSION & REAL-TIME SYNC ON LOAD
+// INITIALIZE SESSION, MIDNIGHT AUTO-RESET & REAL-TIME SYNC
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
-    restoreSessionOnLoad();
+    const monthPicker = document.getElementById('month-picker');
+    if (monthPicker) monthPicker.value = getCurrentMonthValue();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('guest') === '1') {
+        openGuestPortal();
+    } else {
+        restoreSessionOnLoad();
+    }
+
     pullDataFromFirebase(true);
+
     setInterval(() => {
         pullDataFromFirebase(false);
     }, 5000);
+
+    // Tự động kiểm tra qua ngày mới mỗi 30 giây để reset bảng thu nhập hôm nay về 0 ₫
+    setInterval(() => {
+        const nowDateStr = getTodayDateStr();
+        if (nowDateStr !== activeDateKey) {
+            activeDateKey = nowDateStr;
+            const mp = document.getElementById('month-picker');
+            if (mp) mp.value = getCurrentMonthValue();
+            if (currentUser) {
+                renderStats();
+                renderTransactions();
+                showToast(`Đã bước sang ngày mới (${nowDateStr}). Bảng thu nhập hôm nay đã tự làm mới!`, 'info');
+            }
+        }
+    }, 30000);
 });
 
 window.addEventListener('focus', () => {
     pullDataFromFirebase(false);
+    if (currentUser) renderStats();
 });
