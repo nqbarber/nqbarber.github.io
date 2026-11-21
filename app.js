@@ -72,7 +72,44 @@ const DEFAULT_DATA = {
             date: '19/11/2026 10:15'
         }
     ],
-    bookings: [],
+    bookings: [
+        {
+            id: 'bk-1001',
+            customerName: 'Anh Quốc Bảo',
+            phone: '0908112233',
+            date: '2026-11-21',
+            time: '14:30',
+            barber: 'Minh Quân (Master)',
+            guestCount: 1,
+            serviceQty: 1,
+            servicesText: 'Combo Đế Vương (Full) x1',
+            selectedItems: [{ id: 'srv-2', name: 'Combo Đế Vương (Full)', price: 150000, qty: 1, subtotal: 150000 }],
+            serviceIds: ['srv-2'],
+            estimatedTotal: 150000,
+            status: 'done',
+            approvedBy: 'Quản Trị Viên (Chủ Tiệm) (admin)',
+            approvedAt: '21/11/2026 14:25',
+            createdAt: '21/11/2026 11:10'
+        },
+        {
+            id: 'bk-1002',
+            customerName: 'Anh Gia Huy',
+            phone: '0933445566',
+            date: '2026-11-21',
+            time: '16:15',
+            barber: 'Hoàng Nam',
+            guestCount: 2,
+            serviceQty: 2,
+            servicesText: 'Cắt Tóc Tạo Kiểu VIP x2',
+            selectedItems: [{ id: 'srv-1', name: 'Cắt Tóc Tạo Kiểu VIP', price: 80000, qty: 2, subtotal: 160000 }],
+            serviceIds: ['srv-1'],
+            estimatedTotal: 160000,
+            status: 'pending',
+            approvedBy: '',
+            approvedAt: '',
+            createdAt: '21/11/2026 15:20'
+        }
+    ],
     gallery: [
         {
             id: 'img-1',
@@ -105,6 +142,178 @@ let revealedPasswords = {};
 let lastSyncedSnapshot = '';
 let isSyncingToCloud = false;
 let activeDateKey = getTodayDateStr();
+
+// ==========================================
+// SOUND EFFECTS (TINH TINH TINH & TIỀN XU RƠI)
+// ==========================================
+let soundEnabled = true;
+let audioCtx = null;
+let knownBookingIds = new Set();
+let hasInitializedBookingTracker = false;
+let bookingFilterMode = 'all';
+
+function getAudioContext() {
+    if (!soundEnabled) return null;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    if (!audioCtx) {
+        audioCtx = new AudioContextClass();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
+}
+
+function toggleSoundEffects() {
+    soundEnabled = !soundEnabled;
+    updateSoundToggleUI();
+    if (soundEnabled) {
+        getAudioContext();
+        playTinhTinhTinh();
+        showToast('Đã BẬT âm thanh thông báo đặt lịch & tiếng tiền xu rơi!', 'success');
+    } else {
+        showToast('Đã TẮT âm thanh thông báo.', 'info');
+    }
+}
+
+function updateSoundToggleUI() {
+    const icon = document.getElementById('sound-toggle-icon');
+    const text = document.getElementById('sound-toggle-text');
+    if (icon) {
+        icon.className = soundEnabled ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark text-barber-red';
+    }
+    if (text) {
+        text.textContent = soundEnabled ? 'Âm Thanh: BẬT' : 'Âm Thanh: TẮT';
+    }
+}
+
+// Âm thanh "tinh tinh tinh" khi có khách đặt lịch
+function playTinhTinhTinh() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const notes = [
+        { freq: 1567.98, start: 0.00, dur: 0.22 },
+        { freq: 1975.53, start: 0.14, dur: 0.24 },
+        { freq: 2349.32, start: 0.28, dur: 0.42 }
+    ];
+
+    notes.forEach(n => {
+        const osc = ctx.createOscillator();
+        const overtone = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const overtoneGain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(n.freq, now + n.start);
+
+        overtone.type = 'triangle';
+        overtone.frequency.setValueAtTime(n.freq * 2, now + n.start);
+
+        gain.gain.setValueAtTime(0.0001, now + n.start);
+        gain.gain.exponentialRampToValueAtTime(0.24, now + n.start + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur);
+
+        overtoneGain.gain.setValueAtTime(0.0001, now + n.start);
+        overtoneGain.gain.exponentialRampToValueAtTime(0.07, now + n.start + 0.01);
+        overtoneGain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur * 0.65);
+
+        osc.connect(gain);
+        overtone.connect(overtoneGain);
+        gain.connect(ctx.destination);
+        overtoneGain.connect(ctx.destination);
+
+        osc.start(now + n.start);
+        overtone.start(now + n.start);
+        osc.stop(now + n.start + n.dur + 0.02);
+        overtone.stop(now + n.start + n.dur + 0.02);
+    });
+}
+
+// Âm thanh tiếng tiền xu rơi leng keng khi thanh toán xong
+function playCoinDropSound() {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const coins = [
+        { f1: 2786, f2: 3720, t: 0.00, d: 0.14 },
+        { f1: 3136, f2: 4186, t: 0.09, d: 0.14 },
+        { f1: 2637, f2: 3520, t: 0.17, d: 0.15 },
+        { f1: 3520, f2: 4698, t: 0.25, d: 0.16 },
+        { f1: 2960, f2: 3951, t: 0.33, d: 0.18 },
+        { f1: 3322, f2: 4434, t: 0.41, d: 0.22 }
+    ];
+
+    coins.forEach(c => {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc1.type = 'sine';
+        osc2.type = 'triangle';
+
+        osc1.frequency.setValueAtTime(c.f1, now + c.t);
+        osc1.frequency.exponentialRampToValueAtTime(c.f2, now + c.t + c.d * 0.7);
+
+        osc2.frequency.setValueAtTime(c.f1 * 1.48, now + c.t);
+        osc2.frequency.exponentialRampToValueAtTime(c.f2 * 1.48, now + c.t + c.d * 0.7);
+
+        gain.gain.setValueAtTime(0.0001, now + c.t);
+        gain.gain.exponentialRampToValueAtTime(0.20, now + c.t + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + c.t + c.d);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc1.start(now + c.t);
+        osc2.start(now + c.t);
+        osc1.stop(now + c.t + c.d + 0.02);
+        osc2.stop(now + c.t + c.d + 0.02);
+    });
+}
+
+function checkNewBookingsAndAlert() {
+    const bookings = Array.isArray(appData.bookings) ? appData.bookings : [];
+    const currentIds = new Set(bookings.map(b => b.id));
+
+    if (!hasInitializedBookingTracker) {
+        knownBookingIds = currentIds;
+        hasInitializedBookingTracker = true;
+        return;
+    }
+
+    const newlyArrived = bookings.filter(b => !knownBookingIds.has(b.id));
+    knownBookingIds = currentIds;
+
+    if (newlyArrived.length > 0) {
+        playTinhTinhTinh();
+        const latest = newlyArrived[0];
+        if (currentUser) {
+            showToast(`🔔 Có ${newlyArrived.length} lịch hẹn mới: ${latest.customerName} (${latest.time} - ${latest.date})!`, 'info');
+        }
+    }
+}
+
+function setBookingFilter(mode) {
+    bookingFilterMode = mode;
+    const tabs = {
+        all: document.getElementById('bk-tab-all'),
+        pending: document.getElementById('bk-tab-pending'),
+        done: document.getElementById('bk-tab-done')
+    };
+    Object.entries(tabs).forEach(([key, btn]) => {
+        if (!btn) return;
+        btn.className = (key === mode)
+            ? 'px-3 py-1.5 rounded-lg bg-barber-gold text-barber-black font-extrabold text-xs transition'
+            : 'px-3 py-1.5 rounded-lg text-gray-300 hover:text-white font-bold text-xs transition';
+    });
+    renderBookingsModal();
+}
+
 
 function normalizeAppData(raw) {
     const base = JSON.parse(JSON.stringify(DEFAULT_DATA));
@@ -254,6 +463,7 @@ async function pullDataFromFirebase(isInitial = false) {
 
         if (remoteStr !== localStr) {
             appData = normalizedRemote;
+            checkNewBookingsAndAlert();
             lastSyncedSnapshot = remoteStr;
             localStorage.setItem(STORAGE_KEY, remoteStr);
 
@@ -650,7 +860,9 @@ document.getElementById('guest-booking-form')?.addEventListener('submit', functi
     };
 
     appData.bookings.unshift(newBooking);
+    knownBookingIds.add(newBooking.id);
     saveData();
+    playTinhTinhTinh();
 
     guestSelectedServices = {};
     document.getElementById('guest-booking-form').reset();
@@ -739,12 +951,27 @@ function renderBookingsModal() {
     const container = document.getElementById('bookings-list-container');
     if (!container) return;
 
-    const list = appData.bookings || [];
+    const search = (document.getElementById('bk-search')?.value || '').trim().toLowerCase();
+    const rawList = appData.bookings || [];
+
+    const list = rawList.filter(bk => {
+        if (bookingFilterMode === 'pending' && bk.status === 'done') return false;
+        if (bookingFilterMode === 'done' && bk.status !== 'done') return false;
+        if (!search) return true;
+        return (
+            (bk.customerName || '').toLowerCase().includes(search) ||
+            (bk.phone || '').toLowerCase().includes(search) ||
+            (bk.barber || '').toLowerCase().includes(search) ||
+            (bk.approvedBy || '').toLowerCase().includes(search) ||
+            (bk.servicesText || '').toLowerCase().includes(search)
+        );
+    });
+
     if (list.length === 0) {
         container.innerHTML = `
             <div class="py-10 text-center text-gray-500 text-xs">
                 <i class="fa-solid fa-calendar-xmark text-2xl mb-2 opacity-40"></i>
-                <p>Chưa có lịch hẹn nào từ khách hàng.</p>
+                <p>Không có lịch hẹn nào khớp với bộ lọc hiện tại.</p>
             </div>
         `;
         return;
@@ -752,8 +979,12 @@ function renderBookingsModal() {
 
     container.innerHTML = list.map(bk => {
         const isDone = bk.status === 'done';
+        const approverText = bk.approvedBy
+            ? `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-user-check mr-1"></i>Người duyệt: ${bk.approvedBy}</span>${bk.approvedAt ? ` <span class="text-gray-400">(${bk.approvedAt})</span>` : ''}`
+            : `<span class="text-amber-400 font-semibold"><i class="fa-solid fa-hourglass-half mr-1"></i>Chưa có người duyệt</span>`;
+
         return `
-            <div class="bg-barber-dark/90 rounded-xl p-4 border ${isDone ? 'border-gray-800 opacity-70' : 'border-barber-gold/40'} flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="bg-barber-dark/90 rounded-xl p-4 border ${isDone ? 'border-emerald-500/30' : 'border-barber-gold/40'} flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div class="space-y-1">
                     <div class="flex flex-wrap items-center gap-2">
                         <span class="font-bold text-white text-sm">${bk.customerName}</span>
@@ -761,8 +992,9 @@ function renderBookingsModal() {
                             <i class="fa-solid fa-phone mr-1"></i>${bk.phone}
                         </a>
                         ${isDone
-                            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400">ĐÃ ĐẾN TIỆM</span>'
-                            : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-barber-red/20 text-barber-gold">CHỜ ĐÓN KHÁCH</span>'}
+                            ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400">ĐÃ DUYỆT / ĐÃ ĐẾN</span>'
+                            : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-barber-red/20 text-barber-gold">CHỜ DUYỆT & ĐÓN KHÁCH</span>'}
+                        ${bk.createdAt ? `<span class="text-[10px] text-gray-500">Đặt lúc: ${bk.createdAt}</span>` : ''}
                     </div>
                     <p class="text-xs text-gray-300">
                         <i class="fa-solid fa-clock text-barber-gold mr-1"></i>Hẹn lúc: <strong>${bk.time}</strong> ngày <strong>${bk.date}</strong> • Thợ: <span class="text-barber-gold">${bk.barber}</span>
@@ -771,11 +1003,12 @@ function renderBookingsModal() {
                         <i class="fa-solid fa-users text-emerald-400 mr-1"></i>Số khách: <strong>${bk.guestCount || 1}</strong> • Số lượng DV: <strong>${bk.serviceQty || 1}</strong> • Ước tính: <span class="text-barber-gold font-bold">${formatVND(bk.estimatedTotal || 0)}</span>
                     </p>
                     <p class="text-xs text-gray-400">Dịch vụ: ${bk.servicesText}</p>
+                    <p class="text-xs pt-0.5">${approverText}</p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     ${!isDone ? `
                         <button type="button" onclick="applyBookingToBill('${bk.id}')" class="px-3 py-2 rounded-lg bg-barber-gold hover:bg-barber-goldHover text-barber-black font-extrabold text-xs transition">
-                            Đưa Vào Hóa Đơn
+                            Duyệt & Đưa Vào Hóa Đơn
                         </button>
                     ` : ''}
                     <button type="button" onclick="deleteBooking('${bk.id}')" class="p-2 rounded-lg bg-gray-800 hover:bg-barber-red text-gray-300 hover:text-white text-xs transition" title="Xóa lịch hẹn">
@@ -792,6 +1025,8 @@ function applyBookingToBill(id) {
     if (!bk) return;
 
     bk.status = 'done';
+    bk.approvedBy = currentUser ? `${currentUser.displayName} (${currentUser.username})` : 'Nhân viên';
+    bk.approvedAt = getCurrentTimestamp();
     document.getElementById('bill-customer').value = `${bk.customerName} (${bk.phone})`;
 
     if (Array.isArray(bk.selectedItems) && bk.selectedItems.length > 0) {
@@ -1441,6 +1676,7 @@ function confirmBillPayment() {
     clearCurrentBill();
     renderStats();
     renderTransactions();
+    playCoinDropSound();
     openModal('modal-transfer-success');
     showToast(`Chuyển khoản đã thành công! Đã cộng ${formatVND(total)} vào doanh thu.`, 'success');
 }
@@ -1911,3 +2147,10 @@ window.changeGuestCount = changeGuestCount;
 window.incrementGuestServiceQty = incrementGuestServiceQty;
 window.changeGuestServiceQty = changeGuestServiceQty;
 window.getGuestSelectedItems = getGuestSelectedItems;
+
+window.toggleSoundEffects = toggleSoundEffects;
+window.updateSoundToggleUI = updateSoundToggleUI;
+window.playTinhTinhTinh = playTinhTinhTinh;
+window.playCoinDropSound = playCoinDropSound;
+window.checkNewBookingsAndAlert = checkNewBookingsAndAlert;
+window.setBookingFilter = setBookingFilter;

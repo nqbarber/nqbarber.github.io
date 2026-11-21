@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/png" href="logo-nq.png">
-    <link rel="apple-touch-icon" href="logo-nq.png">
     <title>NQ BARBER - Hệ Thống Quản Lý &amp; Đặt Lịch Cắt Tóc</title>
 
     <!-- Tailwind CSS -->
@@ -61,8 +59,8 @@
 
         <div class="glass-card w-full max-w-md rounded-2xl p-6 sm:p-8 relative z-10 border-t-2 border-barber-gold my-auto">
             <div class="text-center mb-6">
-                <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-barber-black border-2 border-barber-gold shadow-[0_0_28px_rgba(255,215,0,0.45)] mb-4 overflow-hidden p-1.5">
-                    <img src="logo-nq.png" alt="NQ BARBER Logo" class="w-full h-full object-contain rounded-full">
+                <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-barber-black border-2 border-barber-gold shadow-[0_0_25px_rgba(255,215,0,0.35)] mb-4">
+                    <i class="fa-solid fa-scissors text-3xl text-barber-gold transform -rotate-45"></i>
                 </div>
                 <h1 class="font-display text-3xl sm:text-4xl font-bold tracking-wider text-white">
                     NQ <span class="text-barber-gold">BARBER</span>
@@ -139,8 +137,8 @@
             <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex flex-wrap items-center justify-between min-h-[68px] py-2.5 gap-3">
                     <div class="flex items-center gap-3">
-                        <div class="w-12 h-12 rounded-xl bg-barber-black border border-barber-gold/70 flex items-center justify-center shadow-[0_0_15px_rgba(255,215,0,0.3)] overflow-hidden p-1">
-                            <img src="logo-nq.png" alt="NQ BARBER Logo" class="w-full h-full object-contain">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-barber-gold to-yellow-600 flex items-center justify-center text-barber-black shadow-lg">
+                            <i class="fa-solid fa-scissors text-xl transform -rotate-45"></i>
                         </div>
                         <div>
                             <div class="flex items-center gap-2">
@@ -327,8 +325,8 @@
                 <div class="flex flex-wrap items-center justify-between min-h-[68px] py-2 gap-2">
                     <!-- Brand -->
                     <div class="flex items-center gap-3">
-                        <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-barber-black border border-barber-gold/70 flex items-center justify-center shadow-[0_0_15px_rgba(255,215,0,0.3)] overflow-hidden p-1">
-                            <img src="logo-nq.png" alt="NQ BARBER Logo" class="w-full h-full object-contain">
+                        <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-barber-gold to-yellow-600 flex items-center justify-center text-barber-black shadow-lg">
+                            <i class="fa-solid fa-scissors text-xl sm:text-2xl transform -rotate-45"></i>
                         </div>
                         <div>
                             <div class="flex items-center gap-2">
@@ -345,6 +343,14 @@
                     <!-- Actions & Role Info -->
                     <div class="flex flex-wrap items-center gap-2 sm:gap-3">
                         <div id="user-role-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-barber-dark border border-gray-700 text-xs sm:text-sm"></div>
+
+                        <!-- Sound Toggle Button -->
+                        <button id="btn-toggle-sound" type="button" onclick="toggleSoundEffects()" class="btn-rgb-float" title="Bật / Tắt âm thanh thông báo &amp; tiền xu">
+                            <div class="btn-rgb-inner bg-barber-dark hover:bg-gray-800 px-3 py-2 text-xs font-bold text-barber-gold">
+                                <i id="sound-toggle-icon" class="fa-solid fa-volume-high"></i>
+                                <span id="sound-toggle-text" class="hidden md:inline">Âm Thanh: BẬT</span>
+                            </div>
+                        </button>
 
                         <!-- Booking Notifications Button -->
                         <button type="button" onclick="openBookingsModal()" class="btn-rgb-float" title="Xem danh sách khách hàng đặt lịch">
@@ -1262,6 +1268,23 @@
                 <p class="text-xs text-gray-400">Bấm "Đưa Vào Hóa Đơn" khi khách đến tiệm để tính tiền nhanh</p>
             </div>
 
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-800">
+                <div class="inline-flex flex-wrap rounded-xl bg-barber-dark p-1 border border-gray-800 gap-1">
+                    <button type="button" id="bk-tab-all" onclick="setBookingFilter('all')" class="px-3 py-1.5 rounded-lg bg-barber-gold text-barber-black font-extrabold text-xs transition">
+                        Tất Cả Lịch Sử
+                    </button>
+                    <button type="button" id="bk-tab-pending" onclick="setBookingFilter('pending')" class="px-3 py-1.5 rounded-lg text-gray-300 hover:text-white font-bold text-xs transition">
+                        Chờ Đón Khách
+                    </button>
+                    <button type="button" id="bk-tab-done" onclick="setBookingFilter('done')" class="px-3 py-1.5 rounded-lg text-gray-300 hover:text-white font-bold text-xs transition">
+                        Đã Duyệt / Đã Đến
+                    </button>
+                </div>
+                <div class="relative flex-1 min-w-[180px] max-w-xs">
+                    <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                    <input type="text" id="bk-search" oninput="renderBookingsModal()" placeholder="Tìm khách, SĐT, người duyệt..." class="w-full pl-8 pr-3 py-1.5 bg-barber-dark border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-barber-gold">
+                </div>
+            </div>
             <div id="bookings-list-container" class="space-y-3 max-h-[420px] overflow-y-auto pr-1"></div>
         </div>
     </div>
