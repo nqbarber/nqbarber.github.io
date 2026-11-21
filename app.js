@@ -100,7 +100,7 @@ const DEFAULT_DATA = {
 let appData = loadData();
 let currentUser = null;
 let selectedServices = {};
-let guestSelectedIds = new Set();
+let guestSelectedServices = {};
 let revealedPasswords = {};
 let lastSyncedSnapshot = '';
 let isSyncingToCloud = false;
@@ -498,9 +498,11 @@ function renderGuestPortal() {
     if (!grid) return;
 
     grid.innerHTML = appData.services.map(srv => {
-        const isChecked = guestSelectedIds.has(srv.id);
+        const qty = Number(guestSelectedServices[srv.id]) || 0;
+        const isChecked = qty > 0;
+        const lineTotal = (Number(srv.price) || 0) * qty;
         return `
-            <div onclick="toggleGuestService('${srv.id}')"
+            <div onclick="incrementGuestServiceQty('${srv.id}')"
                 class="cursor-pointer rounded-xl p-4 border transition-all duration-200 flex flex-col justify-between select-none
                 ${isChecked
                     ? 'bg-barber-gold/15 border-barber-gold shadow-[0_0_20px_rgba(255,215,0,0.2)]'
@@ -508,18 +510,39 @@ function renderGuestPortal() {
                 <div>
                     <div class="flex items-start justify-between gap-2">
                         <h4 class="font-bold text-sm sm:text-base ${isChecked ? 'text-barber-gold' : 'text-white'}">${srv.name}</h4>
-                        <span class="w-6 h-6 rounded-full flex items-center justify-center border shrink-0
-                            ${isChecked ? 'bg-barber-gold text-barber-black border-barber-gold' : 'border-gray-600 text-gray-500'}">
-                            <i class="fa-solid ${isChecked ? 'fa-check' : 'fa-plus'} text-xs"></i>
-                        </span>
+                        ${isChecked
+                            ? `<span class="px-2 py-0.5 rounded-full bg-barber-gold text-barber-black font-extrabold text-xs shrink-0 shadow">x${qty}</span>`
+                            : `<span class="w-6 h-6 rounded-full flex items-center justify-center border border-gray-600 text-gray-500 shrink-0">
+                                <i class="fa-solid fa-plus text-xs"></i>
+                               </span>`}
                     </div>
                     <p class="text-xs text-gray-400 mt-1">${srv.desc || 'Dịch vụ tiêu chuẩn NQ Barber'}</p>
                 </div>
-                <div class="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between">
-                    <span class="font-display text-lg font-bold text-barber-gold">${formatVND(srv.price)}</span>
-                    <span class="text-[11px] font-bold ${isChecked ? 'text-emerald-400' : 'text-gray-400'}">
-                        ${isChecked ? '✓ Đã chọn đặt lịch' : 'Bấm để chọn'}
-                    </span>
+                <div class="mt-3 pt-2.5 border-t border-gray-800/80 flex items-center justify-between gap-2">
+                    <div>
+                        <span class="font-display text-lg font-bold text-barber-gold">${formatVND(srv.price)}</span>
+                        ${isChecked ? `<span class="block text-[10px] text-emerald-400 font-semibold">Thành tiền: ${formatVND(lineTotal)}</span>` : ''}
+                    </div>
+                    <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+                        ${isChecked ? `
+                            <div class="inline-flex items-center bg-barber-black border border-barber-gold/60 rounded-lg overflow-hidden">
+                                <button type="button" onclick="changeGuestServiceQty('${srv.id}', -1)"
+                                    class="w-7 h-7 flex items-center justify-center text-gray-300 hover:bg-barber-red hover:text-white font-bold text-xs transition" title="Giảm số lượng">
+                                    <i class="fa-solid fa-minus"></i>
+                                </button>
+                                <span class="px-2.5 text-xs font-extrabold text-barber-gold">${qty}</span>
+                                <button type="button" onclick="changeGuestServiceQty('${srv.id}', 1)"
+                                    class="w-7 h-7 flex items-center justify-center text-gray-300 hover:bg-barber-gold hover:text-barber-black font-bold text-xs transition" title="Tăng số lượng">
+                                    <i class="fa-solid fa-plus"></i>
+                                </button>
+                            </div>
+                        ` : `
+                            <button type="button" onclick="incrementGuestServiceQty('${srv.id}')"
+                                class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-barber-gold hover:text-barber-black text-[11px] font-bold text-gray-300 transition">
+                                + Chọn
+                            </button>
+                        `}
+                    </div>
                 </div>
             </div>
         `;
@@ -528,24 +551,66 @@ function renderGuestPortal() {
     updateGuestBookingSummary();
 }
 
-function toggleGuestService(id) {
-    if (guestSelectedIds.has(id)) {
-        guestSelectedIds.delete(id);
+function incrementGuestServiceQty(id) {
+    guestSelectedServices[id] = (Number(guestSelectedServices[id]) || 0) + 1;
+    renderGuestPortal();
+}
+
+function changeGuestServiceQty(id, delta) {
+    const nextQty = (Number(guestSelectedServices[id]) || 0) + delta;
+    if (nextQty <= 0) {
+        delete guestSelectedServices[id];
     } else {
-        guestSelectedIds.add(id);
+        guestSelectedServices[id] = nextQty;
     }
     renderGuestPortal();
 }
 
+function getGuestSelectedItems() {
+    const items = [];
+    for (const srv of appData.services) {
+        const qty = Number(guestSelectedServices[srv.id]) || 0;
+        if (qty > 0) {
+            items.push({
+                id: srv.id,
+                name: srv.name,
+                price: Number(srv.price) || 0,
+                qty: qty,
+                subtotal: (Number(srv.price) || 0) * qty
+            });
+        }
+    }
+    return items;
+}
+
+function changeGuestCount(delta) {
+    const el = document.getElementById('book-guest-count');
+    if (!el) return;
+    const next = Math.max(1, Math.min(50, (Number(el.value) || 1) + delta));
+    el.value = next;
+    updateGuestBookingSummary();
+}
+
 function updateGuestBookingSummary() {
-    const selected = appData.services.filter(s => guestSelectedIds.has(s.id));
-    const total = selected.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+    const selectedItems = getGuestSelectedItems();
+    const total = selectedItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const guestCount = Math.max(1, Number(document.getElementById('book-guest-count')?.value) || 1);
+
     const totalEl = document.getElementById('book-estimated-total');
+    const formulaEl = document.getElementById('book-price-formula');
     const noteEl = document.getElementById('book-service-note');
 
     if (totalEl) totalEl.textContent = formatVND(total);
-    if (noteEl && selected.length > 0) {
-        noteEl.value = selected.map(s => `${s.name} (${formatVND(s.price)})`).join(', ');
+    if (formulaEl) {
+        formulaEl.textContent = selectedItems.length > 0
+            ? `${selectedItems.map(i => `${i.name} x${i.qty}`).join(' + ')} • ${guestCount} khách`
+            : `Chưa chọn dịch vụ • ${guestCount} khách`;
+    }
+    if (noteEl && selectedItems.length > 0) {
+        const names = selectedItems.map(s => `${s.name} x${s.qty} (${formatVND(s.subtotal)})`).join(', ');
+        noteEl.value = `${names} | SL khách: ${guestCount}`;
+    } else if (noteEl && selectedItems.length === 0) {
+        noteEl.value = '';
     }
 }
 
@@ -556,10 +621,16 @@ document.getElementById('guest-booking-form')?.addEventListener('submit', functi
     const dateVal = document.getElementById('book-date').value;
     const timeVal = document.getElementById('book-time').value;
     const barber = document.getElementById('book-barber').value;
-    const note = document.getElementById('book-service-note').value.trim() || 'Cắt tóc tư vấn tại tiệm';
+    const guestCount = Math.max(1, Number(document.getElementById('book-guest-count')?.value) || 1);
 
-    const selected = appData.services.filter(s => guestSelectedIds.has(s.id));
-    const estimatedTotal = selected.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+    const selectedItems = getGuestSelectedItems();
+    const estimatedTotal = selectedItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const totalServiceQty = selectedItems.reduce((sum, item) => sum + item.qty, 0) || 1;
+
+    const defaultServiceDesc = selectedItems.length > 0
+        ? selectedItems.map(s => `${s.name} x${s.qty}`).join(', ')
+        : 'Cắt tóc tư vấn tại tiệm';
+    const note = document.getElementById('book-service-note').value.trim() || defaultServiceDesc;
 
     const newBooking = {
         id: 'bk-' + Date.now(),
@@ -568,8 +639,11 @@ document.getElementById('guest-booking-form')?.addEventListener('submit', functi
         date: dateVal,
         time: timeVal,
         barber: barber,
+        guestCount: guestCount,
+        serviceQty: totalServiceQty,
         servicesText: note,
-        serviceIds: Array.from(guestSelectedIds),
+        selectedItems: selectedItems,
+        serviceIds: selectedItems.map(s => s.id),
         estimatedTotal: estimatedTotal,
         status: 'pending',
         createdAt: getCurrentTimestamp()
@@ -578,11 +652,12 @@ document.getElementById('guest-booking-form')?.addEventListener('submit', functi
     appData.bookings.unshift(newBooking);
     saveData();
 
-    guestSelectedIds.clear();
+    guestSelectedServices = {};
     document.getElementById('guest-booking-form').reset();
     document.getElementById('book-date').value = getTodayInputDate();
+    if (document.getElementById('book-guest-count')) document.getElementById('book-guest-count').value = 1;
     renderGuestPortal();
-    showToast(`Đặt lịch thành công! Hẹn gặp ${name} lúc ${timeVal} ngày ${dateVal}.`, 'success');
+    showToast(`Đặt lịch thành công (${guestCount} khách, ${totalServiceQty} DV)! Ước tính ${formatVND(estimatedTotal)}.`, 'success');
 });
 
 // ==========================================
@@ -692,6 +767,9 @@ function renderBookingsModal() {
                     <p class="text-xs text-gray-300">
                         <i class="fa-solid fa-clock text-barber-gold mr-1"></i>Hẹn lúc: <strong>${bk.time}</strong> ngày <strong>${bk.date}</strong> • Thợ: <span class="text-barber-gold">${bk.barber}</span>
                     </p>
+                    <p class="text-xs text-gray-300">
+                        <i class="fa-solid fa-users text-emerald-400 mr-1"></i>Số khách: <strong>${bk.guestCount || 1}</strong> • Số lượng DV: <strong>${bk.serviceQty || 1}</strong> • Ước tính: <span class="text-barber-gold font-bold">${formatVND(bk.estimatedTotal || 0)}</span>
+                    </p>
                     <p class="text-xs text-gray-400">Dịch vụ: ${bk.servicesText}</p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
@@ -716,11 +794,19 @@ function applyBookingToBill(id) {
     bk.status = 'done';
     document.getElementById('bill-customer').value = `${bk.customerName} (${bk.phone})`;
 
-    if (Array.isArray(bk.serviceIds) && bk.serviceIds.length > 0) {
+    if (Array.isArray(bk.selectedItems) && bk.selectedItems.length > 0) {
+        selectedServices = {};
+        bk.selectedItems.forEach(item => {
+            if (appData.services.some(s => s.id === item.id)) {
+                selectedServices[item.id] = Math.max(1, Number(item.qty) || 1);
+            }
+        });
+    } else if (Array.isArray(bk.serviceIds) && bk.serviceIds.length > 0) {
+        const qtyToApply = Math.max(1, Number(bk.serviceQty) || 1);
         selectedServices = {};
         bk.serviceIds.forEach(sid => {
             if (appData.services.some(s => s.id === sid)) {
-                selectedServices[sid] = 1;
+                selectedServices[sid] = qtyToApply;
             }
         });
     }
@@ -1820,3 +1906,8 @@ window.getOffsetInputDate = getOffsetInputDate;
 window.selectQuickDay = selectQuickDay;
 window.onDayPickerChange = onDayPickerChange;
 window.filterTransactionsBySelectedDay = filterTransactionsBySelectedDay;
+
+window.changeGuestCount = changeGuestCount;
+window.incrementGuestServiceQty = incrementGuestServiceQty;
+window.changeGuestServiceQty = changeGuestServiceQty;
+window.getGuestSelectedItems = getGuestSelectedItems;
