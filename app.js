@@ -549,7 +549,7 @@ function updateGuestBookingSummary() {
     }
 }
 
-document.getElementById('guest-booking-form').addEventListener('submit', function(e) {
+document.getElementById('guest-booking-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     const name = document.getElementById('book-name').value.trim();
     const phone = document.getElementById('book-phone').value.trim();
@@ -588,7 +588,7 @@ document.getElementById('guest-booking-form').addEventListener('submit', functio
 // ==========================================
 // AUTHENTICATION & ROLE MANAGEMENT
 // ==========================================
-document.getElementById('login-form').addEventListener('submit', async function(e) {
+document.getElementById('login-form')?.addEventListener('submit', async function(e) {
     e.preventDefault();
     const u = document.getElementById('login-username').value.trim().toLowerCase();
     const p = document.getElementById('login-password').value.trim();
@@ -825,7 +825,7 @@ function updateMemberPassword(idx) {
     showToast(`Đã đổi mật khẩu thành công cho "${targetUser.displayName}" (${targetUser.username})!`, 'success');
 }
 
-document.getElementById('add-account-form').addEventListener('submit', function(e) {
+document.getElementById('add-account-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     if (!currentUser || currentUser.role !== 'admin') return;
 
@@ -903,12 +903,94 @@ function renderShopHeader() {
     }
 }
 
+function formatInputDateToVN(inputVal) {
+    if (!inputVal || !inputVal.includes('-')) return getTodayDateStr();
+    const [y, m, d] = inputVal.split('-');
+    return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+}
+
+function getOffsetInputDate(offsetDays = 0) {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + offsetDays);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+function selectQuickDay(offsetDays) {
+    const dayPicker = document.getElementById('day-picker');
+    if (dayPicker) {
+        dayPicker.value = getOffsetInputDate(offsetDays);
+        const monthPicker = document.getElementById('month-picker');
+        if (monthPicker) monthPicker.value = dayPicker.value.slice(0, 7);
+    }
+    renderStats();
+    if (document.getElementById('tx-filter')?.value === 'selected-day') {
+        renderTransactions();
+    }
+}
+
+function onDayPickerChange() {
+    const dayPicker = document.getElementById('day-picker');
+    if (dayPicker && dayPicker.value) {
+        const monthPicker = document.getElementById('month-picker');
+        if (monthPicker) monthPicker.value = dayPicker.value.slice(0, 7);
+    }
+    renderStats();
+    if (document.getElementById('tx-filter')?.value === 'selected-day') {
+        renderTransactions();
+    }
+}
+
+function filterTransactionsBySelectedDay() {
+    const filterEl = document.getElementById('tx-filter');
+    if (filterEl) {
+        filterEl.value = 'selected-day';
+        renderTransactions();
+        document.getElementById('transactions-tbody')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
 function renderStats() {
     const todayStr = getTodayDateStr();
+    const yesterdayStr = formatInputDateToVN(getOffsetInputDate(-1));
     activeDateKey = todayStr;
 
+    const dayPicker = document.getElementById('day-picker');
+    if (dayPicker && !dayPicker.value) {
+        dayPicker.value = getTodayInputDate();
+    }
+    const viewingDateStr = dayPicker ? formatInputDateToVN(dayPicker.value) : todayStr;
+    const isToday = viewingDateStr === todayStr;
+    const isYesterday = viewingDateStr === yesterdayStr;
+
+    const btnToday = document.getElementById('btn-quick-today');
+    const btnYesterday = document.getElementById('btn-quick-yesterday');
+    if (btnToday && btnYesterday) {
+        btnToday.className = isToday
+            ? 'px-3 py-1.5 rounded-lg bg-barber-gold text-barber-black font-extrabold text-xs transition'
+            : 'px-3 py-1.5 rounded-lg text-gray-300 hover:text-white font-bold text-xs transition';
+        btnYesterday.className = isYesterday
+            ? 'px-3 py-1.5 rounded-lg bg-barber-gold text-barber-black font-extrabold text-xs transition'
+            : 'px-3 py-1.5 rounded-lg text-gray-300 hover:text-white font-bold text-xs transition';
+    }
+
+    const dayShortLabel = isToday ? 'Hôm Nay' : (isYesterday ? 'Hôm Qua' : `Ngày ${viewingDateStr}`);
+    const badgeEl = document.getElementById('day-mode-badge');
+    if (badgeEl) {
+        badgeEl.innerHTML = isToday
+            ? '<i class="fa-solid fa-rotate mr-1"></i> Hôm Nay (Tự Reset 00:00)'
+            : '<i class="fa-solid fa-clock-rotate-left mr-1"></i> Đang Tra Cứu Lịch Sử Ngày';
+    }
+    const titleEl = document.getElementById('day-board-title');
+    if (titleEl) {
+        titleEl.innerHTML = `<i class="fa-solid fa-calendar-day text-barber-gold"></i> Bảng Thu Nhập ${dayShortLabel}`;
+    }
     const todayLabelEl = document.getElementById('today-date-label');
-    if (todayLabelEl) todayLabelEl.textContent = `Hôm nay: ${todayStr}`;
+    if (todayLabelEl) todayLabelEl.textContent = `Ngày đang xem: ${viewingDateStr}`;
+
+    document.getElementById('today-rev-label').textContent = `Doanh Thu ${dayShortLabel}`;
+    document.getElementById('today-exp-label').textContent = `Chi Tiêu ${dayShortLabel}`;
+    document.getElementById('today-profit-label').textContent = `Thực Nhận ${dayShortLabel} (Thu - Chi)`;
 
     const monthPicker = document.getElementById('month-picker');
     if (monthPicker && !monthPicker.value) {
@@ -916,7 +998,6 @@ function renderStats() {
     }
     const selectedMonth = monthPicker ? monthPicker.value : getCurrentMonthValue();
 
-    // Format month label "Tháng MM/YYYY"
     let monthDisplay = selectedMonth;
     if (selectedMonth && selectedMonth.includes('-')) {
         const [y, m] = selectedMonth.split('-');
@@ -927,7 +1008,7 @@ function renderStats() {
     document.getElementById('month-exp-label').textContent = `Chi Tiêu ${monthDisplay}`;
     document.getElementById('month-profit-label').textContent = `Lợi Nhuận ${monthDisplay}`;
 
-    let todayRev = 0, todayExp = 0, todayBills = 0, todayExps = 0;
+    let dayRev = 0, dayExp = 0, dayBills = 0, dayExps = 0;
     let monthRev = 0, monthExp = 0, monthBills = 0, monthExps = 0;
     let totalRev = 0, totalExp = 0;
 
@@ -937,9 +1018,9 @@ function renderStats() {
 
         if (tx.type === 'income') {
             totalRev += amt;
-            if (dateStr === todayStr) {
-                todayRev += amt;
-                todayBills++;
+            if (dateStr === viewingDateStr) {
+                dayRev += amt;
+                dayBills++;
             }
             if (monthKey === selectedMonth) {
                 monthRev += amt;
@@ -947,9 +1028,9 @@ function renderStats() {
             }
         } else {
             totalExp += amt;
-            if (dateStr === todayStr) {
-                todayExp += amt;
-                todayExps++;
+            if (dateStr === viewingDateStr) {
+                dayExp += amt;
+                dayExps++;
             }
             if (monthKey === selectedMonth) {
                 monthExp += amt;
@@ -958,15 +1039,12 @@ function renderStats() {
         }
     });
 
-    // Update Today's Board (Tự động 0 ₫ khi qua ngày mới)
-    const todayProfit = todayRev - todayExp;
-    document.getElementById('today-revenue').textContent = formatVND(todayRev);
-    document.getElementById('today-expense').textContent = formatVND(todayExp);
-    document.getElementById('today-profit').textContent = formatVND(todayProfit);
-    document.getElementById('today-bill-count').textContent = `${todayBills} hóa đơn trong ngày`;
-    document.getElementById('today-expense-count').textContent = `${todayExps} khoản chi trong ngày`;
+    document.getElementById('today-revenue').textContent = formatVND(dayRev);
+    document.getElementById('today-expense').textContent = formatVND(dayExp);
+    document.getElementById('today-profit').textContent = formatVND(dayRev - dayExp);
+    document.getElementById('today-bill-count').textContent = `${dayBills} hóa đơn ngày ${viewingDateStr}`;
+    document.getElementById('today-expense-count').textContent = `${dayExps} khoản chi ngày ${viewingDateStr}`;
 
-    // Update Monthly Board
     const monthProfit = monthRev - monthExp;
     const monthMargin = monthRev > 0 ? Math.round((monthProfit / monthRev) * 100) : 0;
     document.getElementById('month-revenue').textContent = formatVND(monthRev);
@@ -976,11 +1054,9 @@ function renderStats() {
     document.getElementById('month-expense-count').innerHTML = `<i class="fa-solid fa-box-open mr-1"></i>${monthExps} khoản chi`;
     document.getElementById('month-margin').textContent = `Tỷ suất lợi nhuận: ${monthMargin}%`;
 
-    // Update All-Time Summary Card
-    const totalProfit = totalRev - totalExp;
     document.getElementById('stat-revenue').textContent = formatVND(totalRev);
     document.getElementById('stat-expense').textContent = formatVND(totalExp);
-    document.getElementById('stat-profit').textContent = formatVND(totalProfit);
+    document.getElementById('stat-profit').textContent = formatVND(totalRev - totalExp);
 }
 
 function clearServiceSearch() {
@@ -1295,9 +1371,13 @@ function renderTransactions() {
 
     const filtered = appData.transactions.filter(tx => {
         const { dateStr } = parseTxDateInfo(tx.date);
+        const dayPicker = document.getElementById('day-picker');
+        const selectedDateStr = dayPicker ? formatInputDateToVN(dayPicker.value) : todayStr;
         let matchType = true;
         if (filter === 'today') {
             matchType = dateStr === todayStr;
+        } else if (filter === 'selected-day') {
+            matchType = dateStr === selectedDateStr;
         } else if (filter !== 'all') {
             matchType = tx.type === filter;
         }
@@ -1354,7 +1434,7 @@ function openExpenseModal() {
     openModal('modal-expense');
 }
 
-document.getElementById('expense-form').addEventListener('submit', function(e) {
+document.getElementById('expense-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     const category = document.getElementById('exp-category').value;
     const desc = document.getElementById('exp-desc').value.trim();
@@ -1400,7 +1480,7 @@ function openServiceModal(id = null) {
     openModal('modal-service');
 }
 
-document.getElementById('service-form').addEventListener('submit', function(e) {
+document.getElementById('service-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     const id = document.getElementById('srv-id').value;
     const name = document.getElementById('srv-name').value.trim();
@@ -1443,7 +1523,7 @@ function openEditTxModal(id) {
     openModal('modal-edit-tx');
 }
 
-document.getElementById('edit-tx-form').addEventListener('submit', function(e) {
+document.getElementById('edit-tx-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     const id = document.getElementById('edit-tx-id').value;
     const idx = appData.transactions.findIndex(t => t.id === id);
@@ -1481,7 +1561,7 @@ function openDirectAdjustModal() {
     openModal('modal-direct-adjust');
 }
 
-document.getElementById('direct-adjust-form').addEventListener('submit', function(e) {
+document.getElementById('direct-adjust-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     const targetRev = Number(document.getElementById('adj-revenue').value);
     const targetExp = Number(document.getElementById('adj-expense').value);
@@ -1539,7 +1619,7 @@ function openShopSettingsModal() {
     openModal('modal-shop-settings');
 }
 
-document.getElementById('shop-settings-form').addEventListener('submit', function(e) {
+document.getElementById('shop-settings-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     appData.shopInfo.name = document.getElementById('set-shop-name').value.trim() || 'NQ BARBER';
     appData.shopInfo.tagline = document.getElementById('set-shop-tagline').value.trim();
@@ -1600,7 +1680,7 @@ function openAddPhotoModal() {
     openModal('modal-add-photo');
 }
 
-document.getElementById('add-photo-form').addEventListener('submit', function(e) {
+document.getElementById('add-photo-form')?.addEventListener('submit', function(e) {
     e.preventDefault();
     const caption = document.getElementById('photo-caption').value.trim();
     const url = document.getElementById('photo-url').value.trim();
@@ -1628,6 +1708,8 @@ function openLightbox(url, caption) {
 // INITIALIZE SESSION, MIDNIGHT AUTO-RESET & REAL-TIME SYNC
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
+    const dayPicker = document.getElementById('day-picker');
+    if (dayPicker) dayPicker.value = getTodayInputDate();
     const monthPicker = document.getElementById('month-picker');
     if (monthPicker) monthPicker.value = getCurrentMonthValue();
 
@@ -1649,6 +1731,8 @@ window.addEventListener('DOMContentLoaded', () => {
         const nowDateStr = getTodayDateStr();
         if (nowDateStr !== activeDateKey) {
             activeDateKey = nowDateStr;
+            const dp = document.getElementById('day-picker');
+            if (dp) dp.value = getTodayInputDate();
             const mp = document.getElementById('month-picker');
             if (mp) mp.value = getCurrentMonthValue();
             if (currentUser) {
@@ -1664,3 +1748,75 @@ window.addEventListener('focus', () => {
     pullDataFromFirebase(false);
     if (currentUser) renderStats();
 });
+
+// Đảm bảo mọi hàm onclick hoạt động ổn định trên mọi trình duyệt
+window.normalizeAppData = normalizeAppData;
+window.loadData = loadData;
+window.getTodayDateStr = getTodayDateStr;
+window.getTodayInputDate = getTodayInputDate;
+window.getCurrentMonthValue = getCurrentMonthValue;
+window.parseTxDateInfo = parseTxDateInfo;
+window.updateSyncBadge = updateSyncBadge;
+window.pushDataToFirebase = pushDataToFirebase;
+window.pullDataFromFirebase = pullDataFromFirebase;
+window.saveData = saveData;
+window.saveSession = saveSession;
+window.clearSession = clearSession;
+window.restoreSessionOnLoad = restoreSessionOnLoad;
+window.formatVND = formatVND;
+window.getCurrentTimestamp = getCurrentTimestamp;
+window.removeAccents = removeAccents;
+window.getSelectedServiceItems = getSelectedServiceItems;
+window.showToast = showToast;
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
+window.openGuestPortal = openGuestPortal;
+window.closeGuestPortal = closeGuestPortal;
+window.copyGuestLink = copyGuestLink;
+window.renderGuestPortal = renderGuestPortal;
+window.toggleGuestService = toggleGuestService;
+window.updateGuestBookingSummary = updateGuestBookingSummary;
+window.handleLogin = handleLogin;
+window.logout = logout;
+window.applyRoleUI = applyRoleUI;
+window.updateBookingBadge = updateBookingBadge;
+window.openBookingsModal = openBookingsModal;
+window.renderBookingsModal = renderBookingsModal;
+window.applyBookingToBill = applyBookingToBill;
+window.deleteBooking = deleteBooking;
+window.openAccountManagerModal = openAccountManagerModal;
+window.renderAccountsTable = renderAccountsTable;
+window.toggleRevealPassword = toggleRevealPassword;
+window.updateMemberPassword = updateMemberPassword;
+window.deleteMemberAccount = deleteMemberAccount;
+window.renderAll = renderAll;
+window.renderShopHeader = renderShopHeader;
+window.renderStats = renderStats;
+window.clearServiceSearch = clearServiceSearch;
+window.renderServices = renderServices;
+window.incrementServiceQty = incrementServiceQty;
+window.changeServiceQty = changeServiceQty;
+window.removeServiceFromBill = removeServiceFromBill;
+window.clearCurrentBill = clearCurrentBill;
+window.renderCurrentBill = renderCurrentBill;
+window.openQRCheckoutModal = openQRCheckoutModal;
+window.confirmBillPayment = confirmBillPayment;
+window.renderTransactions = renderTransactions;
+window.openExpenseModal = openExpenseModal;
+window.openServiceModal = openServiceModal;
+window.deleteService = deleteService;
+window.openEditTxModal = openEditTxModal;
+window.deleteTransaction = deleteTransaction;
+window.openDirectAdjustModal = openDirectAdjustModal;
+window.openShopSettingsModal = openShopSettingsModal;
+window.resetDemoData = resetDemoData;
+window.renderGallery = renderGallery;
+window.openAddPhotoModal = openAddPhotoModal;
+window.deleteGalleryPhoto = deleteGalleryPhoto;
+window.openLightbox = openLightbox;
+window.formatInputDateToVN = formatInputDateToVN;
+window.getOffsetInputDate = getOffsetInputDate;
+window.selectQuickDay = selectQuickDay;
+window.onDayPickerChange = onDayPickerChange;
+window.filterTransactionsBySelectedDay = filterTransactionsBySelectedDay;

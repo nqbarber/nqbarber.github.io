@@ -23,6 +23,13 @@ body {
     overflow-x: hidden;
 }
 
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+}
+
 .barber-stripe {
     background: repeating-linear-gradient(
         -45deg,
@@ -76,6 +83,7 @@ body {
     width: 200%;
     height: 200%;
     z-index: -1;
+    pointer-events: none;
     background: conic-gradient(
         from 0deg,
         #ff0000, #ff7300, #fffb00, #48ff00,
@@ -125,4 +133,10 @@ body {
     border: 1px solid rgba(255, 215, 0, 0.2);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(12px);
+}
+
+/* Tối ưu cảm ứng chạm trên iPhone / iOS Safari */
+button, a, [onclick] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
