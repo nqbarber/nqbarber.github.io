@@ -2235,3 +2235,398 @@ window.playTinhTinhTinh = playTinhTinhTinh;
 window.playCoinDropSound = playCoinDropSound;
 window.checkNewBookingsAndAlert = checkNewBookingsAndAlert;
 window.setBookingFilter = setBookingFilter;
+// ==========================================
+// NQ BARBER FREE WEB CALL BUBBLE (2-WAY WEBRTC FOR MOBILE & DESKTOP)
+// ==========================================
+(function () {
+  const DB_BASE = 'https://nq-barber-db-default-rtdb.asia-southeast1.firebasedatabase.app';
+  const CALLS_URL = `${DB_BASE}/nq_barber_calls.json`;
+  const RTC_CFG = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' }
+    ]
+  };
+
+  let pc = null;
+  let stream = null;
+  let callId = null;
+  let callRole = null;
+  let incomingCall = null;
+  let globalPollTimer = null;
+  let activeCallTimer = null;
+  let appliedIce = new Set();
+  let sentIce = new Set();
+
+  function getDeviceLabel() {
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    return isMobile ? 'Điện thoại' : 'Máy tính';
+  }
+
+  function getCallerName() {
+    if (typeof currentUser !== 'undefined' && currentUser && currentUser.displayName) {
+      return `${currentUser.displayName} (${getDeviceLabel()})`;
+    }
+    const guestName = document.getElementById('book-name')?.value?.trim();
+    return guestName ? `${guestName} (${getDeviceLabel()})` : `Khách hàng (${getDeviceLabel()})`;
+  }
+
+  function getRemoteAudio() {
+    let audio = document.getElementById('nq-call-remote-audio');
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.id = 'nq-call-remote-audio';
+      audio.autoplay = true;
+      audio.playsInline = true;
+      audio.setAttribute('playsinline', '');
+      audio.setAttribute('webkit-playsinline', '');
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
+    }
+    return audio;
+  }
+
+  function unlockMobileAudio() {
+    const audio = getRemoteAudio();
+    audio.muted = false;
+    audio.volume = 1.0;
+    if (typeof getAudioContext === 'function') {
+      getAudioContext();
+    }
+  }
+
+  function createBubble() {
+    if (document.getElementById('nq-call-bubble-wrap')) return;
+    getRemoteAudio();
+
+    const wrap = document.createElement('div');
+    wrap.id = 'nq-call-bubble-wrap';
+    wrap.className = 'nq-call-bubble-wrap';
+
+    const incomingBox = document.createElement('div');
+    incomingBox.id = 'nq-incoming-call-box';
+    incomingBox.className = 'nq-incoming-box hidden';
+    incomingBox.innerHTML = `
+      <div class="nq-incoming-info">
+        <span class="nq-incoming-badge"><i class="fa-solid fa-phone-volume fa-shake"></i> Cuộc gọi đến</span>
+        <strong id="nq-incoming-caller-name">Khách hàng</strong>
+      </div>
+      <div class="nq-incoming-actions">
+        <button type="button" id="nq-btn-accept-call" class="nq-btn-accept">
+          <i class="fa-solid fa-phone"></i> Nghe
+        </button>
+        <button type="button" id="nq-btn-decline-call" class="nq-btn-decline">
+          <i class="fa-solid fa-phone-slash"></i> Từ chối
+        </button>
+      </div>
+    `;
+
+    const btn = document.createElement('button');
+    btn.id = 'nq-call-bubble';
+    btn.type = 'button';
+    btn.className = 'nq-call-bubble';
+    btn.innerHTML = '<i class="fa-solid fa-phone"></i><span>Cuộc gọi web miễn phí</span>';
+    btn.onclick = () => (callId ? hangupCall() : startCall());
+
+    wrap.appendChild(incomingBox);
+    wrap.appendChild(btn);
+    document.body.appendChild(wrap);
+
+    document.getElementById('nq-btn-accept-call').onclick = () => {
+      if (incomingCall) acceptIncomingCall(incomingCall);
+    };
+    document.getElementById('nq-btn-decline-call').onclick = () => {
+      if (incomingCall) declineIncomingCall(incomingCall.id);
+    };
+
+    startGlobalIncomingListener();
+  }
+
+  function setCallingState(stateText, isCalling) {
+    const btn = document.getElementById('nq-call-bubble');
+    if (!btn) return;
+    btn.classList.toggle('is-calling', Boolean(isCalling));
+    btn.innerHTML = isCalling
+      ? `<i class="fa-solid fa-phone-slash"></i><span>${stateText}</span>`
+      : '<i class="fa-solid fa-phone"></i><span>Cuộc gọi web miễn phí</span>';
+  }
+
+  function showIncomingBanner(rec) {
+    const box = document.getElementById('nq-incoming-call-box');
+    const nameEl = document.getElementById('nq-incoming-caller-name');
+    if (!box || !nameEl) return;
+    if (!rec) {
+      box.classList.add('hidden');
+      incomingCall = null;
+      return;
+    }
+    incomingCall = rec;
+    nameEl.textContent = rec.callerName || 'Người gọi trên web';
+    box.classList.remove('hidden');
+  }
+
+  async function patchCall(id, data) {
+    if (!id) return;
+    await fetch(`${DB_BASE}/nq_barber_calls/${encodeURIComponent(id)}.json`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  }
+
+  async function fetchCalls() {
+    try {
+      const res = await fetch(`${CALLS_URL}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return {};
+      const data = await res.json();
+      return data && typeof data === 'object' ? data : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  async function requestMicrophone() {
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      if (typeof showToast === 'function') {
+        showToast('Trình duyệt yêu cầu kết nối HTTPS để bật micro gọi điện!', 'error');
+      }
+      return null;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (typeof showToast === 'function') {
+        showToast('Trình duyệt này không hỗ trợ gọi thoại web.', 'error');
+      }
+      return null;
+    }
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: false
+      });
+    } catch (err) {
+      if (typeof showToast === 'function') {
+        showToast('Vui lòng cấp quyền Micro trên trình duyệt để thực hiện cuộc gọi!', 'error');
+      }
+      return null;
+    }
+  }
+
+  function setupPeerConnection(id, role) {
+    const peer = new RTCPeerConnection(RTC_CFG);
+    stream.getTracks().forEach(t => peer.addTrack(t, stream));
+
+    const audioEl = getRemoteAudio();
+    peer.ontrack = (e) => {
+      if (e.streams && e.streams[0]) {
+        audioEl.srcObject = e.streams[0];
+        audioEl.play().catch(() => {});
+      }
+    };
+
+    peer.onconnectionstatechange = () => {
+      if (!peer) return;
+      if (peer.connectionState === 'connected') {
+        setCallingState('Đang đàm thoại — Bấm tắt', true);
+      } else if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
+        cleanupLocal();
+      }
+    };
+
+    peer.onicecandidate = async (e) => {
+      if (!e.candidate || !id) return;
+      const key = JSON.stringify(e.candidate);
+      if (sentIce.has(key)) return;
+      sentIce.add(key);
+
+      const field = role === 'caller' ? 'callerCandidates' : 'calleeCandidates';
+      const map = await fetchCalls();
+      const list = Array.isArray(map[id]?.[field]) ? map[id][field] : [];
+      list.push(e.candidate.toJSON());
+      await patchCall(id, { [field]: list, updatedAt: Date.now() }).catch(() => {});
+    };
+
+    return peer;
+  }
+
+  function cleanupLocal() {
+    if (activeCallTimer) {
+      clearInterval(activeCallTimer);
+      activeCallTimer = null;
+    }
+    if (pc) {
+      try { pc.close(); } catch (_) {}
+      pc = null;
+    }
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    const audioEl = document.getElementById('nq-call-remote-audio');
+    if (audioEl) audioEl.srcObject = null;
+
+    callId = null;
+    callRole = null;
+    appliedIce.clear();
+    sentIce.clear();
+    showIncomingBanner(null);
+    setCallingState('', false);
+  }
+
+  async function hangupCall() {
+    const activeId = callId;
+    cleanupLocal();
+    if (activeId) {
+      await patchCall(activeId, { status: 'ended', updatedAt: Date.now() }).catch(() => {});
+    }
+  }
+
+  async function declineIncomingCall(id) {
+    showIncomingBanner(null);
+    if (id) {
+      await patchCall(id, { status: 'declined', updatedAt: Date.now() }).catch(() => {});
+    }
+  }
+
+  async function startCall() {
+    unlockMobileAudio();
+    const micStream = await requestMicrophone();
+    if (!micStream) return;
+
+    stream = micStream;
+    callId = 'call-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    callRole = 'caller';
+    showIncomingBanner(null);
+    setCallingState('Đang đổ chuông — Bấm hủy', true);
+
+    pc = setupPeerConnection(callId, 'caller');
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    await patchCall(callId, {
+      id: callId,
+      callerName: getCallerName(),
+      status: 'ringing',
+      answeredBy: null,
+      offer: { type: offer.type, sdp: offer.sdp },
+      answer: null,
+      callerCandidates: [],
+      calleeCandidates: [],
+      updatedAt: Date.now()
+    });
+
+    activeCallTimer = setInterval(async () => {
+      if (!callId || !pc) return;
+      const map = await fetchCalls();
+      const rec = map[callId];
+      if (!rec || rec.status === 'ended' || rec.status === 'declined') {
+        if (rec?.status === 'declined' && typeof showToast === 'function') {
+          showToast('Đầu dây bên kia đang bận hoặc đã từ chối cuộc gọi.', 'info');
+        }
+        cleanupLocal();
+        return;
+      }
+      if (rec.answer && !pc.currentRemoteDescription) {
+        await pc.setRemoteDescription(new RTCSessionDescription(rec.answer)).catch(() => {});
+        setCallingState('Đang đàm thoại — Bấm tắt', true);
+      }
+      if (Array.isArray(rec.calleeCandidates) && pc.remoteDescription) {
+        for (const c of rec.calleeCandidates) {
+          const k = JSON.stringify(c);
+          if (!appliedIce.has(k)) {
+            appliedIce.add(k);
+            await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          }
+        }
+      }
+    }, 1200);
+  }
+
+  async function acceptIncomingCall(rec) {
+    if (!rec || !rec.id || !rec.offer) return;
+    unlockMobileAudio();
+
+    const micStream = await requestMicrophone();
+    if (!micStream) return;
+
+    stream = micStream;
+    callId = rec.id;
+    callRole = 'callee';
+    showIncomingBanner(null);
+    setCallingState('Đang kết nối...', true);
+
+    pc = setupPeerConnection(callId, 'callee');
+
+    await pc.setRemoteDescription(new RTCSessionDescription(rec.offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await patchCall(callId, {
+      status: 'connected',
+      answeredBy: getCallerName(),
+      answer: { type: answer.type, sdp: answer.sdp },
+      updatedAt: Date.now()
+    });
+
+    if (Array.isArray(rec.callerCandidates)) {
+      for (const c of rec.callerCandidates) {
+        const k = JSON.stringify(c);
+        if (!appliedIce.has(k)) {
+          appliedIce.add(k);
+          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+        }
+      }
+    }
+
+    activeCallTimer = setInterval(async () => {
+      if (!callId || !pc) return;
+      const map = await fetchCalls();
+      const currentRec = map[callId];
+      if (!currentRec || currentRec.status === 'ended') {
+        cleanupLocal();
+        return;
+      }
+      if (Array.isArray(currentRec.callerCandidates) && pc.remoteDescription) {
+        for (const c of currentRec.callerCandidates) {
+          const k = JSON.stringify(c);
+          if (!appliedIce.has(k)) {
+            appliedIce.add(k);
+            await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          }
+        }
+      }
+    }, 1200);
+  }
+
+  function startGlobalIncomingListener() {
+    if (globalPollTimer) return;
+    globalPollTimer = setInterval(async () => {
+      if (callId) return;
+      const map = await fetchCalls();
+      const now = Date.now();
+      const ringingCalls = Object.values(map)
+        .filter(c => c && c.status === 'ringing' && c.offer && (now - (c.updatedAt || 0) < 45000))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+      if (ringingCalls.length > 0) {
+        const newest = ringingCalls[0];
+        if (!incomingCall || incomingCall.id !== newest.id) {
+          showIncomingBanner(newest);
+          if (typeof playTinhTinhTinh === 'function') {
+            playTinhTinhTinh();
+          }
+        }
+      } else if (incomingCall) {
+        showIncomingBanner(null);
+      }
+    }, 2000);
+  }
+
+  document.addEventListener('DOMContentLoaded', createBubble);
+  if (document.readyState !== 'loading') createBubble();
+})();
